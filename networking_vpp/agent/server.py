@@ -174,6 +174,7 @@ class VPPForwarder(object):
                 # may even be in another bridge domain already (see
                 # above).
                 intf = self.get_trunk_interface()
+                seg_id = int(seg_id)
                 if intf is None:
                     app.logger.error("Error: creating network as a trunk network interface is not available")
                     return {}
