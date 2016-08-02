@@ -77,7 +77,7 @@ class VPPForwarder(object):
                  vxlan_vrf=None):
         self.vpp = vpp.VPPInterface()
         # This is the list of flat network interfaces for providing FLAT networking
-        self.flat_if = flat_network_if.split(',')
+        self.flat_if = flat_network_if.split(',') if flat_network_if else []
         self.active_ifs = set() #set of used upstream interfaces for flat networking
         # This is the trunk interface for VLAN networking
         self.trunk_if = vlan_trunk_if
