@@ -144,7 +144,9 @@ class VPPForwarder(object):
     def get_vpp_ifidx(self, if_name):
         """ Return VPP's interface index value for the network interface"""
         if self.vpp.get_interface(if_name):
-            return self.vpp.get_interface(if_name).sw_if_index
+            indx = self.vpp.get_interface(if_name).sw_if_index
+            app.logger.debug("VPP interface:%s has index:%s" % (if_name, indx))
+            return int(indx)
         else:
             app.logger.error("Error obtaining interface data from vpp for interface:%s" % if_name)
             return None
@@ -176,7 +178,7 @@ class VPPForwarder(object):
                     app.logger.error("Error: creating network as a trunk network interface is not available")
                     return {}
                 trunk_ifidx = self.get_vpp_ifidx(intf)
-                app.logger.debug("Activating VPP's Vlan trunk interface: %s" % intf)
+                app.logger.debug("Activating VPP's Vlan trunk interface: %s - index:%d" % (intf, trunk_ifidx))
                 self.vpp.ifup(trunk_ifidx)
                 if_upstream = self.vpp.create_vlan_subif(trunk_ifidx,
                                                          seg_id)
