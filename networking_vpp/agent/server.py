@@ -216,14 +216,24 @@ class VPPForwarder(object):
 
     def delete_network_on_host(self, net_uuid, net_type):
         net = self.network_on_host(net_uuid)
-        if net is not None:
+        if net:
             try:
                 if net_type == 'flat':
                     self.active_ifs.discard(net['if_upstream'])
             except Exception:
                 app.logger.error("Delete Network: network UUID:%s is unknown to agent" % net_uuid)
-            self.vpp.delete_bridge_domain(net['bridge_domain_id'])
-            self.vpp.ifdown(net['if_upstream_idx'])
+            bridge_domain = net.get('bridge_domain_id', None)
+            if_upstream_idx = net.get('if_upstream_idx', None)
+            if bridge_domain:
+                self.vpp.delete_bridge_domain(bridge_domain)
+            else:
+                app.logger.error("Delete Network:Could not find a bridge domain for network UUID:%s" 
+                    % net_uuid)
+            if if_upstream_idx:
+                self.vpp.ifdown(if_upstream_idx)
+            else:
+                app.logger.error("Delete Network:Could not find an upstream if_index for network UUID:%s" 
+                    % net_uuid)
         else:
             app.logger.error("Delete Network: network UUID:%s is unknown to agent" % net_uuid)
 
