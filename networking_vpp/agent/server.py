@@ -151,6 +151,9 @@ class VPPForwarder(object):
             app.logger.error("Error obtaining interface data from vpp for interface:%s" % if_name)
             return None
 
+    def get_vpp_intf(self, if_name):
+        return self.vpp.get_interface(if_name)
+
     # This, here, is us creating a FLAT, VLAN or VxLAN backed network
     def network_on_host(self, net_uuid, net_type=None, seg_id=None, net_name=None):
         if net_uuid not in self.nets and net_type is not None:
@@ -181,8 +184,11 @@ class VPPForwarder(object):
                 trunk_ifidx = self.get_vpp_ifidx(intf)
                 app.logger.debug("Activating VPP's Vlan trunk interface: %s - index:%d" % (intf, trunk_ifidx))
                 self.vpp.ifup(trunk_ifidx)
-                if_upstream = self.vpp.create_vlan_subif(trunk_ifidx,
+                if not self.get_vpp_intf('%s.%s' % (intf, seg_id)):
+                    if_upstream = self.vpp.create_vlan_subif(trunk_ifidx,
                                                          seg_id)
+                else:
+                    if_upstream = self.get_vpp_ifidx('%s.%s' % (intf, seg_id))
                 app.logger.debug('Adding upstream trunk interface:%s.%s \
                 to bridge for vlan networking' % (intf, seg_id))
             # elif net_type == 'vxlan':
