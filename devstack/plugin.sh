@@ -32,11 +32,8 @@ function init_vpp {
 
 function configure_vpp {
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp agents $MECH_VPP_AGENTLIST
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp physnets $MECH_VPP_PHYSNETLIST
 
-    if [ ! -z "$VLAN_TRUNK_IF" ] ; then
-	iniset /$Q_PLUGIN_CONF_FILE ml2_vpp vlan_trunk_if $VLAN_TRUNK_IF
-    fi
-	
     if [ ! -z "$FLAT_NETWORK_IF" ] ; then
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp flat_network_if $FLAT_NETWORK_IF
     fi
@@ -53,6 +50,13 @@ function configure_vpp {
 	iniset /$Q_PLUGIN_CONF_FILE ml2_vpp vxlan_vrf $VXLAN_VRF
     fi
 
+    if [ ! -z "$QEMU_USER" ] ; then
+	iniset /$Q_PLUGIN_CONF_FILE ml2_vpp qemu_user $QEMU_USER
+    fi
+
+    if [ ! -z "$QEMU_GROUP" ] ; then
+	iniset /$Q_PLUGIN_CONF_FILE ml2_vpp qemu_group $QEMU_GROUP
+    fi
 }
 
 function shut_vpp_down {

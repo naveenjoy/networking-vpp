@@ -18,9 +18,6 @@ import grp
 import os
 import pwd
 import vpp_papi
-from oslo_log import log as logging
-
-LOG = logging.getLogger(__name__)
 
 
 def mac_to_bytes(mac):
@@ -37,22 +34,30 @@ def _vpp_cb(*args, **kwargs):
     pass
 
 
-def _check_retval(t):
-    try:
-        print("checking return value for object: %s" % str(t))
-        if t.retval != 0:
-            print ('FAIL? retval here is %s' % t.retval)
-    #        raise Exception('failed in backend')
-    except AttributeError as e:
-        print("Error: %s" % e)
-
-
 # Sometimes a callback fires unexpectedly.  We need to catch them
 # because vpp_papi will traceback otherwise
 vpp_papi.register_event_callback(_vpp_cb)
 
 
 class VPPInterface(object):
+    def __init__(self, log):
+        self.LOG = log
+        self.r = vpp_papi.connect("test_papi")
+
+    def _check_retval(self, t):
+        """See if VPP returned OK.
+
+        VPP is very inconsistent in return codes, so for now this reports
+        a logged warning rather than flagging an error.
+        """
+
+        try:
+            self.LOG.debug("checking return value for object: %s" % str(t))
+            if t.retval != 0:
+                self.LOG.debug('FAIL? retval here is %s' % t.retval)
+        except AttributeError as e:
+            self.LOG.debug("Unexpected request format.  Error: %s on %s"
+                           % (e, t))
 
     def get_interfaces(self):
         t = vpp_papi.sw_interface_dump(0, b'ignored')
@@ -69,19 +74,20 @@ class VPPInterface(object):
     def get_version(self):
         t = vpp_papi.show_version()
 
-        _check_retval(t)
+        self._check_retval(t)
 
         return fix_string(t.version)
 
     ########################################
 
     def create_tap(self, ifname, mac):
+        # (we don't like unicode in VPP hence str(ifname))
         t = vpp_papi.tap_connect(False,  # random MAC
                                  str(ifname),
                                  mac_to_bytes(mac),
                                  False,  # renumber - who knows, no doc
                                  0)  # customdevinstance - who knows, no doc
-        _check_retval(t)
+        self._check_retval(t)
 
         return t.sw_if_index  # will be -1 on failure (e.g. 'already exists')
 
@@ -89,12 +95,12 @@ class VPPInterface(object):
         vpp_papi.tap_delete(idx)
 
         # Err, I just got a sw_interface_set_flags here, not a delete tap?
-        # _check_retval(t)
+        # self._check_retval(t)
 
     #############################
 
-    def create_vhostuser(self, ifpath, mac):
-        print ('Creating %s as a port' % ifpath)
+    def create_vhostuser(self, ifpath, mac, qemu_user, qemu_group):
+        self.LOG.info('Creating %s as a port' % ifpath)
         t = vpp_papi.create_vhost_user_if(True,  # is a server?
                                           str(ifpath),  # unicode not allowed.
                                           False,  # Who knows what renumber is?
@@ -102,30 +108,25 @@ class VPPInterface(object):
                                           True,  # use custom MAC
                                           mac_to_bytes(mac)
                                           )
-        #LOG.debug("Created vhost user interface object: %s" % str(t))
-        print("Created vhost user interface object: %s" % str(t))
-        _check_retval(t)
+        self.LOG.debug("Created vhost user interface object: %s" % str(t))
+        self._check_retval(t)
 
-        # The permission that qemu runs as (TODO(ijw): should be
-        # configurable)
-        uid = pwd.getpwnam("libvirt-qemu").pw_uid
-        gid = grp.getgrnam("libvirtd").gr_gid
+        # The permission that qemu runs as.
+        self.LOG.info('Changing vhostuser interface file permission to %s:%s'
+                      % (qemu_user, qemu_group))
+        uid = pwd.getpwnam(qemu_user).pw_uid
+        gid = grp.getgrnam(qemu_group).gr_gid
+
         os.chown(ifpath, uid, gid)
         os.chmod(ifpath, 0o770)
 
         return t.sw_if_index
 
     def delete_vhostuser(self, idx):
-        #LOG.debug("Deleting VPP interface - index: %s" % idx)
-        print("Deleting VPP interface - index: %s" % idx)
+        self.LOG.debug("Deleting VPP interface - index: %s" % idx)
         t = vpp_papi.delete_vhost_user_if(idx)
 
-        _check_retval(t)
-
-    ########################################
-
-    def __init__(self):
-        self.r = vpp_papi.connect("test_papi")
+        self._check_retval(t)
 
     def disconnect(self):
         vpp_papi.disconnect()
@@ -140,7 +141,7 @@ class VPPInterface(object):
             False,  # enable ARP termination in the BD
             True  # is an add
         )
-        _check_retval(t)
+        self._check_retval(t)
 
     def delete_bridge_domain(self, id):
         t = vpp_papi.bridge_domain_add_del(
@@ -152,33 +153,32 @@ class VPPInterface(object):
             False,  # enable ARP termination in the BD
             False  # is a delete
         )
-        _check_retval(t)
+        self._check_retval(t)
 
     def create_vlan_subif(self, if_id, vlan_tag):
-        print("Creating vlan subinterface with ID:%s and vlan_tag:%s" % (if_id, vlan_tag))
+        self.LOG.debug("Creating vlan subinterface with ID:%s and vlan_tag:%s"
+                       % (if_id, vlan_tag))
         t = vpp_papi.create_vlan_subif(
             if_id,
             vlan_tag)
-        print("Create vlan subinterface response: %s" % str(t))
+        self.LOG.debug("Create vlan subinterface response: %s" % str(t))
 
-        _check_retval(t)
-
-        return t.sw_if_index
-
-    def create_srcrep_vxlan_subif(self, vrf_id, src_addr, bcast_addr, vnid):
-        t = vpp_papi.vxlan_add_del_tunnel(
-            true,  # is_add
-            src_addr,
-            bcast_addr,
-            vrf_id,
-            decap_next_index,   # what is this?
-            vni)
-
-        _check_retval(t)
+        self._check_retval(t)
 
         return t.sw_if_index
-        
-    
+
+#    def create_srcrep_vxlan_subif(self, vrf_id, src_addr, bcast_addr, vnid):
+#        t = vpp_papi.vxlan_add_del_tunnel(
+#            True,  # is_add
+#            src_addr,
+#            bcast_addr,
+#            vrf_id,
+#            decap_next_index,   # what is this?
+#            vni)
+#
+#        self._check_retval(t)
+#
+#        return t.sw_if_index
     ########################################
 
     def add_to_bridge(self, bridx, *ifidxes):
@@ -188,7 +188,7 @@ class VPPInterface(object):
                 False,                  # BVI (no thanks)
                 0,                      # shared horizon group
                 True)                   # enable bridge mode
-            _check_retval(t)
+            self._check_retval(t)
 
     def ifup(self, *ifidxes):
         for ifidx in ifidxes:
@@ -203,5 +203,3 @@ class VPPInterface(object):
                 ifidx,
                 0, 0,               # admin and link down
                 0)                   # err, I can set the delected flag?
-
-
