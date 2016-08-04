@@ -276,11 +276,11 @@ class VPPMechanismDriver(api.MechanismDriver):
     def get_network_data(self, network_context):
         context = network_context.current
         return {
-            'physical_network': context.get('provider:physical_network', 'physnet')
+            'physical_network': context.get('provider:physical_network', 'physnet'),
             'network_type' : context['provider:network_type'],
             'id' : context['id'],
             'segmentation_id' : context.get('provider:segmentation_id', 0),
-            'name': context['name']
+            'name': context['name'],
             }
 
     def create_network_postcommit(self, network_context):
