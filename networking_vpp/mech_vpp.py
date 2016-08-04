@@ -275,11 +275,15 @@ class VPPMechanismDriver(api.MechanismDriver):
 
     def get_network_data(self, network_context):
         context = network_context.current
+        segmentation_id = context['provider:segmentation_id']
+        #For flat neworks we set this value to 0, required for messaging
+        if segmentation_id is None:
+            segmentation_id = 0  
         return {
             'physical_network': context.get('provider:physical_network', 'physnet'),
             'network_type' : context['provider:network_type'],
             'id' : context['id'],
-            'segmentation_id' : context.get('provider:segmentation_id', 0),
+            'segmentation_id' : segmentation_id,
             'name': context['name'],
             }
 
