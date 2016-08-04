@@ -275,10 +275,9 @@ class VPPMechanismDriver(api.MechanismDriver):
 
     def get_network_data(self, network_context):
         context = network_context.current
-        segmentation_id = context['provider:segmentation_id']
         #For flat neworks we set this value to 0, required for messaging
-        if segmentation_id is None:
-            segmentation_id = 0  
+        segmentation_id = context['provider:segmentation_id'] if \
+                             context['provider:segmentation_id'] is not None else 0
         return {
             'physical_network': context.get('provider:physical_network', 'physnet'),
             'network_type' : context['provider:network_type'],
@@ -365,9 +364,9 @@ class ThreadedAgentCommunicator(AgentCommunicator):
 
     def _worker(self):
         while True:
-            LOG.error("ML2_VPP(%s): worker thread pausing" % self.__class__.__name__)
+            LOG.debug("ML2_VPP(%s): worker thread pausing" % self.__class__.__name__)
             msg = self.queue.get()
-            LOG.error("ML2_VPP(%s): worker thread active" % self.__class__.__name__)
+            LOG.debug("ML2_VPP(%s): worker thread active" % self.__class__.__name__)
             op = msg[0]
             args = msg[1:]
             if op == 'bind':
@@ -476,7 +475,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             'mtu': 1500,  # not this, but what?: port['mtu'],
             'physnet': segment[api.PHYSICAL_NETWORK],
             'network_type': segment[api.NETWORK_TYPE],
-            'segmentation_id': segment.get(api.SEGMENTATION_ID, 0),
+            'segmentation_id': segment[api.SEGMENTATION_ID] if \
+                                segment[api.SEGMENTATION_ID] is not None else 0 ,
             'binding_type': binding_type,
         }
 
@@ -541,7 +541,8 @@ class SimpleAgentCommunicator(ThreadedAgentCommunicator):
             'mtu': 1500,  # not this, but what?: port['mtu'],
             'physnet': segment[api.PHYSICAL_NETWORK],
             'network_type': segment[api.NETWORK_TYPE],
-            'segmentation_id': segment.get(api.SEGMENTATION_ID, 0),
+            'segmentation_id': segment[api.SEGMENTATION_ID] if \
+                                segment[api.SEGMENTATION_ID] is not None else 0 ,
             'binding_type': binding_type,
             'network_id': port['network_id']
         }
