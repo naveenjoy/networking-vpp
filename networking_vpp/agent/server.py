@@ -553,6 +553,7 @@ def main():
 
     global vppf
     physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
+    app.logger.debug('Physnet list: %s' % str(physnet_list))
     physnets = {}
     for f in physnet_list:
         (k, v) = f.split(':')
