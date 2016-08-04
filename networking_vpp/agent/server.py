@@ -556,8 +556,14 @@ def main():
     app.logger.debug('Physnet list: %s' % str(physnet_list))
     physnets = {}
     for f in physnet_list:
-        (k, v) = f.split(':')
-        physnets[k] = v
+        if f:
+            try:
+                (k, v) = f.split(':')
+                physnets[k] = v
+            except:
+                app.logger.error("Could not parse physnet to interface mapping "
+                                 "check the format in the config file: "
+                                 "physnets = physnet1:<interface1>,physnet2:<interface2>")
 
     vppf = VPPForwarder(physnets,
                         flat_network_if=cfg.CONF.ml2_vpp.flat_network_if,
