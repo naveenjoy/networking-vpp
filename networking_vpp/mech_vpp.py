@@ -279,7 +279,7 @@ class VPPMechanismDriver(api.MechanismDriver):
             'physical_network': context.get('provider:physical_network', 'physnet')
             'network_type' : context['provider:network_type'],
             'id' : context['id'],
-            'segmentation_id' : context.get('provider:segmentation_id', 0)
+            'segmentation_id' : context.get('provider:segmentation_id', 0),
             'name': context['name']
             }
 
