@@ -480,9 +480,10 @@ class PortUnbind(Resource):
                          'on network:%s'
                          % (args['host'],
                             id,
-                            args['binding_type']),
-                            args['network_id']
-                         )
+                            args['binding_type'],
+                            args['network_id'],
+                            )
+                          )
         vppf.unbind_interface_on_host(id, args['binding_type'], args['network_id'])
 
 
