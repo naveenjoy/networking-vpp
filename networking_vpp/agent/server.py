@@ -123,13 +123,13 @@ class VPPForwarder(object):
 
     def get_flat_interface(self, phys_net):
         """Return an available interface for flat networking """
-        #TODO(najoy): Use physnets for flat networks
-        interface = None #(TODO) Support physical network names for flat networks
-        for intf in self.flat_if:
-            if intf not in self.active_ifs:
-                app.logger.debug("Using interface:%s for flat networking" % intf)
-                interface = intf
-                break
+        interface = self.physnets.get(phys_net, None) #If a physnet mapping is available use we use it
+        if interface is None:
+            for intf in self.flat_if:
+                if intf not in self.active_ifs:
+                    interface = intf
+                    break
+        app.logger.debug("Using interface:%s for flat networking" % intf)
         return interface
 
     def get_trunk_interface(self, phys_net):
@@ -156,7 +156,8 @@ class VPPForwarder(object):
     def get_vpp_intf(self, if_name):
         return self.vpp.get_interface(if_name)
 
-    # This, here, is us creating a FLAT, VLAN or VxLAN backed network
+    # This, here, is us creating a FLAT, VLAN or VxLAN backed network.
+    # The network is created lazily when a port bind happens on the host
     def network_on_host(self, net_uuid, phys_net=None, net_type=None, seg_id=None, net_name=None):
         if net_uuid not in self.nets and net_type is not None:
             #if (net_type, seg_id) not in self.networks:
@@ -205,14 +206,23 @@ class VPPForwarder(object):
                                'if_upstream_idx': if_upstream,
                                'network_type': net_type,
                                'segmentation_id': seg_id,
-                               'network_name' : net_name
+                               'network_name' : net_name,
+                               'interfaces' : [], #List tuples of bound vpp ifaces [(id, props)]
                                   }
             app.logger.debug('Created network UUID:%s-%s' % (net_uuid, self.nets[net_uuid]))
         return self.nets.get(net_uuid, {})  
 
-    def delete_network_on_host(self, net_uuid, net_type):
+    def delete_network_on_host(self, net_uuid, net_type=None):
         net = self.network_on_host(net_uuid)
         if net:
+            if net_type is None:
+                net_type = net['network_type']
+            elif net_type != net['network_type']:
+                app.logger.error("Delete Network: Type mismatch "
+                                 "Expecting network type:%s Got:%s" 
+                                 % (net['network_type'], net_type)
+                                 )
+                return
             try:
                 if net_type == 'flat':
                     self.active_ifs.discard(net['if_upstream'])
@@ -352,21 +362,22 @@ class VPPForwarder(object):
             self.interfaces[uuid] = (iface, props)
         return self.interfaces[uuid]
 
-    def bind_interface_on_host(self, if_type, uuid, mac, net_type, seg_id, net_id):
-        #net_br_idx = self.network_on_host(net_type, seg_id)
-        if self.network_on_host(net_id):
+    def bind_interface_on_host(self, if_type, uuid, mac, net_type, seg_id, net_id, phys_net):
+        #Bind if the network exists else create network and bind
+        if self.network_on_host(net_id, phys_net, net_type, seg_id): 
             net_data = self.network_on_host(net_id)
             net_br_idx = net_data['bridge_domain_id']
             (iface, props) = self.create_interface_on_host(if_type, uuid, mac)
+            net_data['interfaces'].append(self.interfaces[uuid])
             self.vpp.ifup(iface)
             self.vpp.add_to_bridge(net_br_idx, iface)
             app.logger.debug('Bound vpp interface with sw_indx:%s on bridge domain:%s' 
                 % (iface, net_br_idx))
             return props
         else:
-            app.logger.error('Error: Network ID:%s not known to agent' % net_id)
+            app.logger.error('Error:Binding port:%s on network:%s failed' % (uuid, net_id))
 
-    def unbind_interface_on_host(self, uuid, if_type):
+    def unbind_interface_on_host(self, uuid, if_type, net_id):
         if uuid not in self.interfaces:
             app.logger.debug("unknown port %s unbinding request - ignored" % uuid)
         else:
@@ -400,6 +411,12 @@ class VPPForwarder(object):
                             app.logger.debug(exc)
             else:
                 app.logger.error('Unknown port type %s during unbind' % props['bind_type'])
+            #Delete the interface from network data
+            net_data = self.network_on_host(net_id)
+            net_data['interfaces'].remove(self.interfaces[uuid])
+            #Delete network if no interfaces
+            if not net_data['interfaces']:
+                self.delete_network_on_host(net_id)
 
 
 ######################################################################
@@ -430,32 +447,28 @@ class PortBind(Resource):
                             args['binding_type'],
                             args['network_id'])
                          )
-        if args['binding_type'] in 'vhostuser':
-            app.logger.debug('Creating a vhostuser port:%s binding on host %s' % (id, args['host']))
-            vppf.bind_interface_on_host('vhostuser',
+        binding_type = args['binding_type']
+        if binding_type in [ 'vhostuser', 'plugtap']:
+            app.logger.debug('Creating a port:%s with %s binding on host %s' % 
+                              (id, bindng_type, args['host']))
+            vppf.bind_interface_on_host(
+                                    binding_type,
                                     id,
                                     args['mac_address'],
                                     args['network_type'],
                                     args['segmentation_id'],
-                                    args['network_id']
-                                    )
-        elif args['binding_type'] in 'plugtap':
-            app.logger.debug('Creating a plugtap port:%s binding on host %s' % (id, args['host']))
-            vppf.bind_interface_on_host('plugtap',
-                                    id,
-                                    args['mac_address'],
-                                    args['network_type'],
-                                    args['segmentation_id'],
-                                    args['network_id']
+                                    args['network_id'],
+                                    args['physnet']
                                     )
         else:
-            app.logger.error('Unsupported binding type :%s requested' % args['binding_type'])
+            app.logger.error('Unsupported binding type :%s requested' % binding_type)
 
 
 class PortUnbind(Resource):
     bind_args = reqparse.RequestParser()
     bind_args.add_argument('host', type=str, required=True)
     bind_args.add_argument('binding_type', type=str, required=True)
+    bind_args.add_argument('network_id', type=str, required=True)
 
     def __init(self, *args, **kwargs):
         super('PortUnbind', self).__init__(*args, **kwargs)
@@ -463,68 +476,15 @@ class PortUnbind(Resource):
     def put(self, id):
         global vppf
         args = self.bind_args.parse_args()
-        app.logger.debug('on host %s, unbinding port ID:%s with binding_type:%s'
+        app.logger.debug('on host %s, unbinding port:%s with binding_type:%s '
+                         'on network:%s'
                          % (args['host'],
                             id,
-                            args['binding_type'])
+                            args['binding_type']),
+                            args['network_id']
                          )
-        vppf.unbind_interface_on_host(id, args['binding_type'])
+        vppf.unbind_interface_on_host(id, args['binding_type'], args['network_id'])
 
-
-
-class Network(Resource):
-    bind_args = reqparse.RequestParser()
-    bind_args.add_argument('physical_network', type=str, required=True)
-    bind_args.add_argument('network_type', type=str, required=True)
-    bind_args.add_argument('segmentation_id', type=str, required=True)
-    bind_args.add_argument('name', type=str, required=True)
-
-    def __init(self, *args, **kwargs):
-        super('Network', self).__init__(*args, **kwargs)
-
-    def post(self, id):
-        global vppf
-        args = self.bind_args.parse_args()
-        app.logger.debug("Create network ID:%s name:%s phys_net:%s"
-                         " with network_type:%s and seg_id:%s"
-                         % (id,
-                            args['name'],
-                            args['physical_network'],
-                            args['network_type'],
-                            args['segmentation_id']
-                            )
-                         )
-        vppf.network_on_host(id, 
-                             args['physical_network'], 
-                             args['network_type'], 
-                             args['segmentation_id'], 
-                             args['name'])
-    def put(self, id):
-        global vppf
-        args = self.bind_args.parse_args()
-        app.logger.debug("Update network ID:%s name:%s phys_net:%s"
-                         " with network_type:%s and seg_id:%s"
-                         % (id,
-                            args['name'],
-                            args['physical_network'],
-                            args['network_type'],
-                            args['segmentation_id']
-                            )
-                         )
-        #(najoy)We are not doing anything much at this point for network update 
-
-    def delete(self, id):
-        global vppf
-        args = self.bind_args.parse_args()
-        app.logger.debug("Delete network ID:%s name:%s"
-                         " with network_type:%s and seg_id:%s"
-                         % (id,
-                            args['name'],
-                            args['network_type'],
-                            args['segmentation_id']
-                            )
-                         )
-        vppf.delete_network_on_host(id, args['network_type'])
 
 
 # Basic Flask RESTful app setup with logging
