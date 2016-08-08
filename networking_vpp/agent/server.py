@@ -450,7 +450,7 @@ class PortBind(Resource):
         binding_type = args['binding_type']
         if binding_type in [ 'vhostuser', 'plugtap']:
             app.logger.debug('Creating a port:%s with %s binding on host %s' % 
-                              (id, bindng_type, args['host']))
+                              (id, binding_type, args['host']))
             vppf.bind_interface_on_host(
                                     binding_type,
                                     id,
