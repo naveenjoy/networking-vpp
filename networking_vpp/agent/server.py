@@ -536,7 +536,6 @@ def main():
     api = Api(app)
     api.add_resource(PortBind, '/ports/<id>/bind')
     api.add_resource(PortUnbind, '/ports/<id>/unbind')
-    api.add_resource(Network, '/networks/<id>')
     app.logger.debug("Starting VPP agent on host address: 0.0.0.0 and port 2704")
     app.run(host='0.0.0.0', port=2704)
 
