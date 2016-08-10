@@ -190,8 +190,8 @@ class VPPMechanismDriver(api.MechanismDriver):
         return True
 
     def physnet_known(self, physnet, network_type):
-        # TODO(ijw): this should be a range of physical networks the
-        # agents report in.
+        # najoy: We are supporting any arbitrary physical network names for flat
+        # networking. Will return True for now.
         return True
 
     def check_vlan_transparency(self, port_context):
