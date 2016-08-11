@@ -182,15 +182,17 @@ class VPPForwarder(object):
                                       " mapping could not be found for physnet:%s" % phys_net)
                     return {}
                 trunk_ifidx = self.get_vpp_ifidx(intf)
+                if trunk_ifidx is None:
+                    return {}
                 app.logger.debug("Activating VPP's Vlan trunk interface: %s - index:%d" % (intf, trunk_ifidx))
                 self.vpp.ifup(trunk_ifidx)
                 if not self.get_vpp_intf('%s.%s' % (intf, seg_id)):
                     if_upstream = self.vpp.create_vlan_subif(trunk_ifidx,
-                                                             seg_id)
+                                                         seg_id)
                 else:
                     if_upstream = self.get_vpp_ifidx('%s.%s' % (intf, seg_id))
-                app.logger.debug('Adding upstream trunk interface:%s.%s \
-                to bridge for vlan networking' % (intf, seg_id))
+                    app.logger.debug('Adding upstream trunk interface:%s.%s \
+                        to bridge for vlan networking' % (intf, seg_id))
             else:
                 raise Exception('network type %s not supported', net_type)
             self.vpp.ifup(if_upstream)
