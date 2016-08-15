@@ -483,8 +483,9 @@ class EtcdListener(object):
         		m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, rv.key)
         		if m:
         		    port = m.group(1)
-                    data = json.loads(rv.value)
+                    
         		    if rv.action == 'delete':
+                        data = json.loads(rv.value)
             			# Removing key == desire to unbind
             			self.unbind(port, data['binding_type'], data['network_id'])
             			try:
@@ -495,6 +496,7 @@ class EtcdListener(object):
             			    pass
         		    else:
             			# Create or update == bind
+                        data = json.loads(rv.value)
             			props = self.bind(
                                   port,
             					  data['binding_type'],
