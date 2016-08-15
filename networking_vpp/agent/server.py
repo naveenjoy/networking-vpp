@@ -442,8 +442,8 @@ class EtcdListener(object):
     def unbind(self, id, binding_type, network_id):
 	    self.vppf.unbind_interface_on_host(id, binding_type, network_id)
 
-    def bind(self, id, binding_type, mac_address, physnet, network_type,
-	         segmentation_id, network_id):
+    def bind(self, id, binding_type, mac_address, physnet, 
+        network_type, segmentation_id, network_id):
 	    return self.vppf.bind_interface_on_host(
                      id,
                      binding_type,
@@ -460,8 +460,7 @@ class EtcdListener(object):
     	# storing, so it's lost on reboot of VPP)
     	physnets = self.physnets.keys()
         for f in physnets:
-        	self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % 
-                                    (self.host, f), 1)
+        	self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % (self.host, f), 1)
 
     	tick = None
     	while True:
@@ -482,9 +481,8 @@ class EtcdListener(object):
         		# Matches a port key, gets host and uuid
         		m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, rv.key)
         		if m:
-        		    port = m.group(1)
-                    
-        		    if rv.action == 'delete':
+                    port = m.group(1)
+                    if rv.action == 'delete':
                         data = json.loads(rv.value)
             			# Removing key == desire to unbind
             			self.unbind(port, data['binding_type'], data['network_id'])
