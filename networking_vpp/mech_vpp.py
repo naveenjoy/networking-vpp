@@ -24,8 +24,7 @@ import re
 import requests
 import time
 import traceback
-import socket
-
+from networking_vpp import config_opts
 from neutron.common import constants as n_const
 from neutron import context as n_context
 from neutron.extensions import portbindings
@@ -38,15 +37,6 @@ eventlet.monkey_patch()
 
 LOG = logging.getLogger(__name__)
 
-vpp_opts = [
-    cfg.StrOpt('agents',
-               help=_("Name=HTTP URL mapping list of agents on compute "
-                      "nodes.")),
-]
-
-cfg.CONF.register_opts(vpp_opts, "ml2_vpp")
-
-
 class VPPMechanismDriver(api.MechanismDriver):
     supported_vnic_types = [portbindings.VNIC_NORMAL]
     allowed_network_types = [p_constants.TYPE_FLAT,
@@ -56,13 +46,8 @@ class VPPMechanismDriver(api.MechanismDriver):
     MECH_NAME = 'vpp'
     vif_details = {}
 
-    # TODO(ijw): we have no agent registration because we're not using
-    # Neutron style agents, so at the moment we make up one physical net
-    # that all 'agents' are assumed to know.
-    physical_networks = ['physnet']  # TODO(ijw) should learn from agents.
-
     def initialize(self):
-        self.communicator = SimpleAgentCommunicator()
+        self.communicator = EtcdAgentCommunicator()
 
     def get_vif_type(self, port_context):
         """Determine the type of the vif to be bound from port context"""
@@ -176,29 +161,25 @@ class VPPMechanismDriver(api.MechanismDriver):
 
         if network_type in [p_constants.TYPE_FLAT, p_constants.TYPE_VLAN]:
             physnet = segment[api.PHYSICAL_NETWORK]
-            if not self.physnet_known(physnet, network_type):
+            if not self.physnet_known(host, physnet):
                 LOG.debug(
-                    'ML2_VPP: Network %(network_id)s is connected to physical '
+                    'ML2_VPP: Network %(network_id)s is on physical '
                     'network %(physnet)s, but the physical network '
-                    'is not one this mechdriver knows.  The physical network '
-                    'must be known if binding is to succeed.',
+                    'is not one the host %(host)s has attached.',
                     {'network_id': segment['id'],
-                     'physnet': physnet}
+                     'physnet': physnet,
+		     'host': host}
                 )
                 return False
 
         return True
 
     def physnet_known(self, physnet, network_type):
-        # najoy: We are supporting any arbitrary physical network names for flat
-        # networking. Will return True for now.
-        return True
+        return (host, physnet) in self.communicator.physical_networks
 
     def check_vlan_transparency(self, port_context):
         """Check if the network supports vlan transparency.
-
         :param port_context: NetworkContext instance describing the network.
-
         In general we do not support VLAN transparency (yet).
         """
         return False
@@ -307,7 +288,6 @@ class AgentCommunicator(object):
 	the end of a bind() and everything will probably be
 	fine.  Probably.
 	"""
-
         context = n_context.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
         # Bodge TODO(ijw)
@@ -390,19 +370,6 @@ class ThreadedAgentCommunicator(AgentCommunicator):
     def send_unbind(self, port, host, binding_type):
 	pass
 
-class CompoundAgentCommunicator(AgentCommunicator):
-    # A quick test hack, don't take this too seriously
-    def __init__(self):
-	super(CompoundAgentCommunicator, self).__init__()
-	self.sub = [EtcdAgentCommunicator(), SimpleAgentCommunicator()]
-
-    def bind(self, *args):
-	for f in self.sub:
-	     f.bind(*args)
-
-    def unbind(seelf, *args):
-	for f in self.sub:
-	     f.bind(*args)
 
 LEADIN = '/networking-vpp'  # TODO: make configurable?
 class EtcdAgentCommunicator(ThreadedAgentCommunicator):
@@ -421,20 +388,25 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
     all information on each bound port on the compute node.
     (Unbound ports are homeless, so the act of unbinding is
     the deletion of this entry.)
-    LEADIN/nodes/state/X - return state of the VPP
-    LEADIN/nodes/state/X/ports - port information.
+    LEADIN/state/nodes/X - return state of the VPP
+    LEADIN/state/nodes/X/alive - heartbeat back
+    LEADIN/state/nodes/X/ports - port information.
+    LEADIN/state/nodes/X/physnets - physnets on node
     Specifically a key here (regardless of value) indicates
     the port has been bound and is receiving traffic.
     """
 
     def __init__(self):
         super(EtcdAgentCommunicator, self).__init__()
-
-        # if cfg.CONF.ml2_vpp.etcd is None:
-        #     LOG.error('ML2_VPP: needs etcd endpoints to talk to')
-
-        self.etcd = etcd.Client()  # TODO(ijw): give this args
-
+    	self.physical_networks = set()
+        self.etcd = etcd.Client(
+                        host=cfg.CONF.ml2_vpp.etcd_host,
+                        port=cfg.CONF.ml2_vpp.etcd_port,
+                        allow_reconnect=True
+                             )  
+        # We need certain directories to exist
+        self.mkdir(LEADIN + '/state')
+        self.mkdir(LEADIN + '/nodes')
         self.return_thread = eventlet.spawn(self._return_worker)
 
     def port_path(self, host, port):
@@ -451,114 +423,73 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             'segmentation_id': segment[api.SEGMENTATION_ID] if \
                                 segment[api.SEGMENTATION_ID] is not None else 0 ,
             'binding_type': binding_type,
+            'network_id': port['network_id'], 
         }
-
-	self.etcd.write(self.port_path(host, port),
-			json.dumps(data))
+    	self.etcd.write(self.port_path(host, port),
+            			json.dumps(data))
 
     def send_unbind(self, port, host):
         self.etcd.delete(self.port_path(host, port))
 
+    def mkdir(self, path):
+        try:
+            self.etcd.write(path, None, dir=True)
+        except etcd.EtcdNotFile:
+            # Thrown when the directory already exists, which is fine
+            pass
+
     def _return_worker(self):
+	# TODO this should begin by syncing state, 
+    #particularly of agents but also of any expected, unreceived notifications
+    	for rv in self.etcd.read(LEADIN, recursive=True).children:
+    	    # Find all known physnets
+    	    m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
+    	    if m:
+        		host = m.group(1)
+        		net = m.group(2)
+        		self.physical_networks.add((host, net))
+        tick = None
+    	TIMEOUT = 60  # In theory, to prevent long lived stale TCP connections
         while True:
-	    try:
-		LOG.error("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
-		rv = self.etcd.watch(LEADIN + "/nodes/state", recursive=True)
-		LOG.error("ML2_VPP(%s): return thread active" % self.__class__.__name__)
-
-		# Matches a port key, gets host and uuid
-		m = re.match(LEADIN + '/nodes/state/([^/]+)/ports/([^/]+)$', rv.key)
-
-		if m:
-		    host = m.group(1)
-		    port = m.group(2)
-
-		    self.notify_bound(port, host)
-		else:
-		    LOG.warn('Unexpected key change in etcd port feedback')
-	    
-	    except Exception, e:
-		LOG.error('etcd threw exception %s' % traceback.format_exc(e))
-		time.sleep(2)
-		# Should be specific to etcd faults, should have sensible behaviour
-		# Don't just kill the thread...
-
-
-class SimpleAgentCommunicator(ThreadedAgentCommunicator):
-    def __init__(self):
-        super(SimpleAgentCommunicator, self).__init__()
-
-        if cfg.CONF.ml2_vpp.agents is None:
-            LOG.error('ML2_VPP: needs agents configured right now')
-
-        self.agents = cfg.CONF.ml2_vpp.agents.split(',')
-        LOG.debug("ML2_VPP: Configured agents are: %s " % str(self.agents))
-
-    def send_bind(self, port, segment, host, binding_type):
-        """Send the binding message out to VPP on the compute host"""
-
-        LOG.debug("ML2_VPP: Communicating bind request to agent for "
-                  "port:%(port)s, segment:%(segment)s "
-                  "on host:%(host)s, binding_type:%(binding_type)s",
-                  {
-                      'port': port,
-                      'segment': segment,
-                      'host': host,
-                      'binding_type': binding_type
-                  })
-        # NB segmentation_id is not optional in the wireline protocol,
-        # we just pass 0 for unsegmented network types
-        data = {
-            'host': host,
-            'mac_address': port['mac_address'],
-            'mtu': 1500,  # not this, but what?: port['mtu'],
-            'physnet': segment[api.PHYSICAL_NETWORK],
-            'network_type': segment[api.NETWORK_TYPE],
-            'segmentation_id': segment[api.SEGMENTATION_ID] if \
-                                segment[api.SEGMENTATION_ID] is not None else 0 ,
-            'binding_type': binding_type,
-            'network_id': port['network_id']
-        }
-        self._unicast_msg('ports/%s/bind' % port['id'], data)
-        # This should only be sent when we're certain that the port
-        # is bound. If this is in a bg thread, it should be sent there,
-        # and it should only go when we have confirmed that the far end
-        # has done its work.  The VM will start when it's called and
-        # will wait until then.  For us this is useful beyond the usual
-        # reasons of deplying the VM start until DHCP can be reached,
-        # because we know the server socket is in place for the port.
-        self.notify_bound(port['id'], host)
-
-    def send_unbind(self, port, host, binding_type):
-        """Send the unbinding message out to VPP on the compute host"""
-        LOG.debug("ML2_VPP: Communicating unbind request to agent for "
-                  "port:%(port)s on host:%(host)s",
-                  {
-                      'port': port,
-                      'host': host,
-                      'binding_type': binding_type
-                  })
-        data = {
-                'host': host,
-                'binding_type': binding_type,
-                'network_id': port['network_id']
-                }
-        urlfrag = "ports/%s/unbind" % port['id']
-        LOG.debug("ML2_VPP: unbind urlfrag %s" % urlfrag)
-        self._unicast_msg(urlfrag, data)
-
-    def _unicast_msg(self, urlfrag, msg):
-        # Send unicast message to the agent running on the host
-        hostname = msg['host']
-        host_ip = socket.gethostbyname(hostname)
-        LOG.debug("ML2_VPP: Agent host IP address: %s" % host_ip)
-        ##At this point we support specifying agent IP address only.
-        agts = [ agent for agent in self.agents if host_ip in agent ]
-        if agts:
-            url = agts[0]
-            LOG.debug("ML2_VPP: Sending message:%s to agent at:%s on host:%s" % (msg, url+urlfrag, host_ip))
-            requests.put(url + urlfrag, data=msg)
-        else:
-            LOG.warn("ML2_VPP: Messaging to agent failed.. because the hostIP:%s" \
-                     "is not found in the configured agent URL list" % host_ip)
-
+    	    try:
+        		LOG.debug("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
+        		rv = self.etcd.watch(LEADIN + "/state", recursive=True,
+        				              index=tick, timeout=TIMEOUT)
+        		LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
+                tick = rv.modifiedIndex+1
+        		# Matches a port key, gets host and uuid
+        		m = re.match(LEADIN + '/state/([^/]+)/ports/([^/]+)$', rv.key)
+        		if m:
+        		    host = m.group(1)
+        		    port = m.group(2)
+        		    if rv.action == 'delete':
+        			    # TODO(ijw) there are probably more events to notify
+        			    pass
+        		    else:
+            			self.notify_bound(port, host)
+        		else:
+        		    # Matches a port key, gets host and uuid
+                    m = re.match(LEADIN + '/state/([^/]+)/alive$', rv.key)
+        		    if m:
+            			host = m.group(1)
+            			LOG.info('host %s is alive' % host)
+        		    else:
+            			m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
+            			if m:
+            			    host = m.group(1)
+            			    net = m.group(2)
+            			    if rv.action == 'delete':
+                				self.physical_networks.remove((host, net))
+            			    else:
+                				self.physical_networks.add((host, net))
+            			else:
+            			    LOG.warn('Unexpected key change in etcd port feedback')
+    	    except etcd.EtcdWatchTimedOut:
+        		# this is normal
+        		pass
+    	    except Exception, e:
+        		LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
+        		time.sleep(2)
+        		# TODO(ijw): Should be specific to etcd faults? 
+                # should have sensible behaviour
+        		# Don't just kill the thread...

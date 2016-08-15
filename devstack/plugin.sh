@@ -31,11 +31,20 @@ function init_vpp {
 }
 
 function configure_vpp {
-    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp agents $MECH_VPP_AGENTLIST
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_host $ETCD_HOST
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_port $ETCD_PORT
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp physnets $MECH_VPP_PHYSNETLIST
 
-    if [ ! -z "$FLAT_NETWORK_IF" ] ; then
-    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp flat_network_if $FLAT_NETWORK_IF
+    if [ ! -z "$MECH_VPP_PHYSNETLIST" ] ; then
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp physnets $MECH_VPP_PHYSNETLIST
+    fi
+
+    if [ ! -z "$ETCD_HOST" ] ; then
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_host $ETCD_HOST
+    fi
+
+    if [ ! -z "$ETCD_PORT" ] ; then
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_port $ETCD_PORT
     fi
 
     if [ ! -z "$VXLAN_SRC_ADDR" ] ; then

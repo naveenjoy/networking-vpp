@@ -17,14 +17,13 @@ from neutron._i18n import _
 from oslo_config import cfg
 
 vpp_opts = [
-    cfg.StrOpt('agents',
-               help=_("Comma-separated list of HTTP URLs of agents on compute nodes.")),
     cfg.StrOpt('physnets',
                help=_("Comma-separated list of net-name:interface-name for "
                       "physical connections")),
-    cfg.StrOpt('flat_network_if',
-               help=_("Comma-separated list of physical interfaces available "
-                      "for allocation as flat networks")),
+    cfg.StrOpt('etcd_host',
+                   help=_("IP Address of etcd host")),
+    cfg.IntOpt('etcd_port',
+                   help=_("TCP port on which etcd listens")),
     cfg.StrOpt('vxlan_src_addr',
                help=_("Source address used for VXLAN tunnel packets.")),
     cfg.StrOpt('vxlan_bcast_addr',

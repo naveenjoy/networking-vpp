@@ -4,17 +4,12 @@ MECH_VPP_DIR="$DEST/networking-vpp"
 MECH_VPP_BIN_DIR=$(get_python_exec_prefix)
 VPP_CP_BINARY="$MECH_VPP_BIN_DIR/vpp-agent"
 
-#A comma separated list of agent URL:ports
-#Specify IP addresses only
-MECH_VPP_AGENTLIST=${MECH_VPP_AGENTLIST:-'http://localhost:2704/'}
-
-#A comma separated list of physical networks to interfaces available as uplinks
+#A mapping of named physical networks to uplink interfaces
 MECH_VPP_PHYSNETLIST=${MECH_VPP_PHYSNETLIST:-physnet:GigabitEthernet2/2/0}
-
-# If network type is flat, specify a list of flat network interfaces available for use
-# by the VPP driver for physical networks created using any arbitrary physical-network name
-# not mapped to named physical networks
-FLAT_NETWORK_IF=${FLAT_NETWORK_IF:-'GigabitEthernet2/2/1,GigabitEthernet2/2/2'}
+#Ip address of the ETCD host
+ETCD_HOST=${ETCD_HOST:-127.0.0.1}
+#Client port for etcd
+ETCD_PORT=${ETCD_PORT:-2379}
 
 VXLAN_SRC_ADDR=${VXLAN_SRC_ADDR:-}
 VXLAN_BCAST_ADDR=${VXLAN_BCAST_ADDR:-}
