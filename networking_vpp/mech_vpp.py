@@ -168,7 +168,7 @@ class VPPMechanismDriver(api.MechanismDriver):
                     'is not one the host %(host)s has attached.',
                     {'network_id': segment['id'],
                      'physnet': physnet,
-		     'host': host}
+             'host': host}
                 )
                 return False
 
@@ -271,23 +271,23 @@ class AgentCommunicator(object):
         pass
 
     def notify_bound(self, port_id, host):
-	"""Tell things that the port is truly bound.
+        """Tell things that the port is truly bound.
 
-	You want to call this when you're certain that the VPP
-	on the far end has definitely bound the port, and has
-	dropped a vhost-user socket where it can be found.
+        You want to call this when you're certain that the VPP
+        on the far end has definitely bound the port, and has
+        dropped a vhost-user socket where it can be found.
 
-	You want to do this then specifically because libvirt
-	will hang, because qemu ignores its monitor port,
-	when qemu is waiting for a partner to connect with on
-	its vhost-user interfaces.  It can't start the VM - that
-	requires information from its partner it can't guess at -
-	but it shouldn't hang the monitor - nevertheless...
+        You want to do this then specifically because libvirt
+        will hang, because qemu ignores its monitor port,
+        when qemu is waiting for a partner to connect with on
+        its vhost-user interfaces.  It can't start the VM - that
+        requires information from its partner it can't guess at -
+        but it shouldn't hang the monitor - nevertheless...
 
-	In the case your comms protocol is sucky, call it at
-	the end of a bind() and everything will probably be
-	fine.  Probably.
-	"""
+        In the case your comms protocol is sucky, call it at
+        the end of a bind() and everything will probably be
+        fine.  Probably.
+        """
         context = n_context.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
         # Bodge TODO(ijw)
@@ -364,11 +364,11 @@ class ThreadedAgentCommunicator(AgentCommunicator):
 
     @abstractmethod
     def send_bind(self, port, segment, host, binding_type):
-	pass
+        pass
 
     @abstractmethod
     def send_unbind(self, port, host, binding_type):
-	pass
+        pass
 
 
 LEADIN = '/networking-vpp'  # TODO: make configurable?
@@ -398,7 +398,7 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
 
     def __init__(self):
         super(EtcdAgentCommunicator, self).__init__()
-    	self.physical_networks = set()
+        self.physical_networks = set()
         self.etcd = etcd.Client(
                         host=cfg.CONF.ml2_vpp.etcd_host,
                         port=cfg.CONF.ml2_vpp.etcd_port,
@@ -425,8 +425,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             'binding_type': binding_type,
             'network_id': port['network_id'], 
         }
-    	self.etcd.write(self.port_path(host, port),
-            			json.dumps(data))
+        self.etcd.write(self.port_path(host, port),
+                        json.dumps(data))
 
     def send_unbind(self, port, host):
         self.etcd.delete(self.port_path(host, port))
@@ -439,57 +439,57 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             pass
 
     def _return_worker(self):
-	# TODO this should begin by syncing state, 
+    # TODO this should begin by syncing state, 
     #particularly of agents but also of any expected, unreceived notifications
-    	for rv in self.etcd.read(LEADIN, recursive=True).children:
-    	    # Find all known physnets
-    	    m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
-    	    if m:
-        		host = m.group(1)
-        		net = m.group(2)
-        		self.physical_networks.add((host, net))
+        for rv in self.etcd.read(LEADIN, recursive=True).children:
+            # Find all known physnets
+            m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
+            if m:
+                host = m.group(1)
+                net = m.group(2)
+                self.physical_networks.add((host, net))
         tick = None
-    	TIMEOUT = 60  # In theory, to prevent long lived stale TCP connections
+        TIMEOUT = 60  # In theory, to prevent long lived stale TCP connections
         while True:
-    	    try:
-        		LOG.debug("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
-        		rv = self.etcd.watch(LEADIN + "/state", recursive=True,
-        				              index=tick, timeout=TIMEOUT)
-        		LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
+            try:
+                LOG.debug("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
+                rv = self.etcd.watch(LEADIN + "/state", recursive=True,
+                                      index=tick, timeout=TIMEOUT)
+                LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
                 tick = rv.modifiedIndex+1
-        		# Matches a port key, gets host and uuid
-        		m = re.match(LEADIN + '/state/([^/]+)/ports/([^/]+)$', rv.key)
-        		if m:
-        		    host = m.group(1)
-        		    port = m.group(2)
-        		    if rv.action == 'delete':
-        			    # TODO(ijw) there are probably more events to notify
-        			    pass
-        		    else:
-            			self.notify_bound(port, host)
-        		else:
-        		    # Matches a port key, gets host and uuid
+                # Matches a port key, gets host and uuid
+                m = re.match(LEADIN + '/state/([^/]+)/ports/([^/]+)$', rv.key)
+                if m:
+                    host = m.group(1)
+                    port = m.group(2)
+                    if rv.action == 'delete':
+                        # TODO(ijw) there are probably more events to notify
+                        pass
+                    else:
+                        self.notify_bound(port, host)
+                else:
+                    # Matches a port key, gets host and uuid
                     m = re.match(LEADIN + '/state/([^/]+)/alive$', rv.key)
-        		    if m:
-            			host = m.group(1)
-            			LOG.info('host %s is alive' % host)
-        		    else:
-            			m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
-            			if m:
-            			    host = m.group(1)
-            			    net = m.group(2)
-            			    if rv.action == 'delete':
-                				self.physical_networks.remove((host, net))
-            			    else:
-                				self.physical_networks.add((host, net))
-            			else:
-            			    LOG.warn('Unexpected key change in etcd port feedback')
-    	    except etcd.EtcdWatchTimedOut:
-        		# this is normal
-        		pass
-    	    except Exception, e:
-        		LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
-        		time.sleep(2)
-        		# TODO(ijw): Should be specific to etcd faults? 
+                    if m:
+                        host = m.group(1)
+                        LOG.info('host %s is alive' % host)
+                    else:
+                        m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
+                        if m:
+                            host = m.group(1)
+                            net = m.group(2)
+                            if rv.action == 'delete':
+                                self.physical_networks.remove((host, net))
+                            else:
+                                self.physical_networks.add((host, net))
+                        else:
+                            LOG.warn('Unexpected key change in etcd port feedback')
+            except etcd.EtcdWatchTimedOut:
+                # this is normal
+                pass
+            except Exception, e:
+                LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
+                time.sleep(2)
+                # TODO(ijw): Should be specific to etcd faults? 
                 # should have sensible behaviour
-        		# Don't just kill the thread...
+                # Don't just kill the thread...

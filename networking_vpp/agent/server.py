@@ -419,105 +419,105 @@ class VPPForwarder(object):
 LEADIN = '/networking-vpp'  # TODO: make configurable?
 class EtcdListener(object):
     def __init__(self, host, etcd_client, vppf, physnets):
-    	self.host = host
-    	self.etcd_client = etcd_client
-    	self.vppf = vppf
-    	self.physnets = physnets
+        self.host = host
+        self.etcd_client = etcd_client
+        self.vppf = vppf
+        self.physnets = physnets
         self.HEARTBEAT = 60 # seconds
-    	# We need certain directories to exist
-    	self.mkdir(LEADIN + '/state/%s/ports' % self.host)
-    	self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
+        # We need certain directories to exist
+        self.mkdir(LEADIN + '/state/%s/ports' % self.host)
+        self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
 
     def mkdir(self, path):
-    	try:
-    	    self.etcd_client.write(path, None, dir=True)
-    	except etcd.EtcdNotFile:
-    	    # Thrown when the directory already exists, which is fine
-    	    pass
+        try:
+            self.etcd_client.write(path, None, dir=True)
+        except etcd.EtcdNotFile:
+            # Thrown when the directory already exists, which is fine
+            pass
 
     def repop_interfaces(self):
-    	pass
+        pass
 
     # The vppf bits
     def unbind(self, id, binding_type, network_id):
-	    self.vppf.unbind_interface_on_host(id, binding_type, network_id)
+        self.vppf.unbind_interface_on_host(id, binding_type, network_id)
 
     def bind(self, id, binding_type, mac_address, physnet, 
         network_type, segmentation_id, network_id):
-	    return self.vppf.bind_interface_on_host(
+        return self.vppf.bind_interface_on_host(
                      id,
                      binding_type,
-					 mac_address,
+                     mac_address,
                      network_type,
                      segmentation_id,
                      network_id,
-					 physnet
-					 )
+                     physnet
+                     )
 
     def process_ops(self):
-    	# TODO(ijw): needs to remember its last tick on reboot, or
-    	# reconfigure from start (which means that VPP needs it
-    	# storing, so it's lost on reboot of VPP)
-    	physnets = self.physnets.keys()
+        # TODO(ijw): needs to remember its last tick on reboot, or
+        # reconfigure from start (which means that VPP needs it
+        # storing, so it's lost on reboot of VPP)
+        physnets = self.physnets.keys()
         for f in physnets:
-        	self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % (self.host, f), 1)
+            self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % (self.host, f), 1)
 
-    	tick = None
-    	while True:
-    	    # The key that indicates to people that we're alive
-    	    # (not that they care)
-    	    self.etcd_client.write(LEADIN + '/state/%s/alive' % self.host,
-    				               1, ttl=3*self.HEARTBEAT)
-    	    try:
-        		LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-        		rv = self.etcd_client.watch(LEADIN + "/nodes/%s/ports" % self.host,
-        					                recursive=True,
-        					                index=tick,
+        tick = None
+        while True:
+            # The key that indicates to people that we're alive
+            # (not that they care)
+            self.etcd_client.write(LEADIN + '/state/%s/alive' % self.host,
+                                   1, ttl=3*self.HEARTBEAT)
+            try:
+                LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
+                rv = self.etcd_client.watch(LEADIN + "/nodes/%s/ports" % self.host,
+                                            recursive=True,
+                                            index=tick,
                                             timeout=self.HEARTBEAT)
-        		LOG.debug('watch received %s on %s at tick %s with data %s' %
-        			       rv.action, rv.key, rv.modifiedIndex, rv.value)
-        		tick = rv.modifiedIndex+1
-        		LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
-        		# Matches a port key, gets host and uuid
-        		m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, rv.key)
-        		if m:
+                LOG.debug('watch received %s on %s at tick %s with data %s' %
+                           rv.action, rv.key, rv.modifiedIndex, rv.value)
+                tick = rv.modifiedIndex+1
+                LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
+                # Matches a port key, gets host and uuid
+                m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, rv.key)
+
+                if m:
                     port = m.group(1)
+                    data = json.loads(rv.value)
                     if rv.action == 'delete':
-                        data = json.loads(rv.value)
-            			# Removing key == desire to unbind
-            			self.unbind(port, data['binding_type'], data['network_id'])
-            			try:
-            			    self.etcd_client.delete(LEADIN + '/state/%s/ports/%s'
-        						                     % (self.host, port))
-            			except etcd.EtcdKeyNotFound:
-            			    # Gone is fine, if we didn't delete it it's no problem
-            			    pass
-        		    else:
-            			# Create or update == bind
-                        data = json.loads(rv.value)
-            			props = self.bind(
+                        # Removing key == desire to unbind
+                        self.unbind(port, data['binding_type'], data['network_id'])
+                        try:
+                            self.etcd_client.delete(LEADIN + '/state/%s/ports/%s'
+                                                     % (self.host, port))
+                        except etcd.EtcdKeyNotFound:
+                            # Gone is fine, if we didn't delete it it's no problem
+                            pass
+                    else:
+                        # Create or update == bind
+                        props = self.bind(
                                   port,
-            					  data['binding_type'],
-            					  data['mac_address'],
+                                  data['binding_type'],
+                                  data['mac_address'],
                                   data['physnet'],
                                   data['network_type'],
                                   data['segmentation_id'],
                                   data['network_id']
-            					  )
-            			self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
-            					            % (self.host, port), json.dumps(props))
+                                  )
+                        self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
+                                            % (self.host, port), json.dumps(props))
 
-        		else:
-        		    LOG.warn('Unexpected key change in etcd port feedback')
+                else:
+                    LOG.warn('Unexpected key change in etcd port feedback')
 
-    	    except etcd.EtcdWatchTimedOut:
-        		# This is normal
-        		pass
-    	    except Exception, e:
-        		LOG.error('etcd threw exception %s' % traceback.format_exc(e))
-        		time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
-        		# Should be specific to etcd faults, should have sensible behaviour
-        		# Don't just kill the thread...
+            except etcd.EtcdWatchTimedOut:
+                # This is normal
+                pass
+            except Exception, e:
+                LOG.error('etcd threw exception %s' % traceback.format_exc(e))
+                time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
+                # Should be specific to etcd faults, should have sensible behaviour
+                # Don't just kill the thread...
 
 
 def main():
@@ -530,7 +530,7 @@ def main():
     qemu_group = cfg.CONF.ml2_vpp.qemu_group
     default_user, default_group = get_qemu_default()
     if not qemu_user:
-    	qemu_user = default_user
+        qemu_user = default_user
     if not qemu_group:
         qemu_group = default_group
 
