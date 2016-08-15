@@ -440,8 +440,6 @@ class EtcdListener(object):
 
     # The vppf bits
     def unbind(self, id, binding_type, network_id):
-        """The network_id is required to clean up the network resources
-        when the last port is unbound"""
 	    self.vppf.unbind_interface_on_host(id, binding_type, network_id)
 
     def bind(self, id, binding_type, mac_address, physnet, network_type,
