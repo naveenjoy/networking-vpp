@@ -174,7 +174,7 @@ class VPPMechanismDriver(api.MechanismDriver):
 
         return True
 
-    def physnet_known(self, physnet, network_type):
+    def physnet_known(self, host, physnet):
         return (host, physnet) in self.communicator.physical_networks
 
     def check_vlan_transparency(self, port_context):
@@ -399,6 +399,9 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
     def __init__(self):
         super(EtcdAgentCommunicator, self).__init__()
         self.physical_networks = set()
+        etcd_host = cfg.CONF.ml2_vpp.etcd_host
+        etcd_port = cfg.CONF.ml2_vpp.etcd_port
+        LOG.debug("etcd client - host:%s port:%s" % (etcd_host, etcd_port))
         self.etcd = etcd.Client(
                         host=cfg.CONF.ml2_vpp.etcd_host,
                         port=cfg.CONF.ml2_vpp.etcd_port,
@@ -425,11 +428,15 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             'binding_type': binding_type,
             'network_id': port['network_id'], 
         }
-        self.etcd.write(self.port_path(host, port),
-                        json.dumps(data))
+        port_key = self.port_path(host, port)
+        port_val = json.dumps(data)
+        LOG.debug("writing port key:%s to etcd with val: %s" % (port_key, port_val))
+        self.etcd.write(port_key,port_val)
 
     def send_unbind(self, port, host):
-        self.etcd.delete(self.port_path(host, port))
+        port_key = self.port_path(host, port)
+        LOG.debug("deleting port key:%s from etcd" % port_key)
+        self.etcd.delete(port_key)
 
     def mkdir(self, path):
         try:

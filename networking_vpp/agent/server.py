@@ -43,8 +43,8 @@ from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
-LOG = logging.getLogger(__name__)
 
+LOG = logging.getLogger(__name__)
 ######################################################################
 
 # This mirrors functionality in Neutron so that we're creating a name
@@ -475,7 +475,7 @@ class EtcdListener(object):
                                             index=tick,
                                             timeout=self.HEARTBEAT)
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
-                           rv.action, rv.key, rv.modifiedIndex, rv.value)
+                           (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
                 LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
                 # Matches a port key, gets host and uuid
@@ -522,7 +522,6 @@ class EtcdListener(object):
 
 def main():
     cfg.CONF(sys.argv[1:])
-
     # If the user and/or group are specified in config file, we will use
     # them as configured; otherwise we try to use defaults depending on
     # distribution. Currently only supporting ubuntu and redhat.
@@ -555,7 +554,7 @@ def main():
                         qemu_group=qemu_group)
     LOG.debug("setting etcd client to host:%s port:%s" % 
                        (cfg.CONF.ml2_vpp.etcd_host,
-                        cfg.CONF.ml2_vpp.etcd_port)
+                        cfg.CONF.ml2_vpp.etcd_port,)
                        )
     etcd_client = etcd.Client(
                         host=cfg.CONF.ml2_vpp.etcd_host,
@@ -563,7 +562,7 @@ def main():
                         allow_reconnect=True
                         )
     ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
-    ops.process_ops()
+    #ops.process_ops()
 
 
 if __name__ == '__main__':
