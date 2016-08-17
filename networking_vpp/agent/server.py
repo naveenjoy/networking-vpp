@@ -357,6 +357,7 @@ class VPPForwarder(object):
             net_data = self.network_on_host(net_id)
             net_br_idx = net_data['bridge_domain_id']
             props = self.create_interface_on_host(if_type, uuid, mac)
+            props['network_id'] = net_id
             iface_idx = props['iface_idx']
             net_data['interfaces'].append(self.interfaces[uuid])
             self.vpp.ifup(iface_idx)
@@ -367,18 +368,12 @@ class VPPForwarder(object):
         else:
             LOG.error('Error:Binding port:%s on network:%s failed' % (uuid, net_id))
 
-    def unbind_interface_on_host(self, uuid, if_type, net_id):
+    def unbind_interface_on_host(self, uuid):
         if uuid not in self.interfaces:
             LOG.debug("unknown port %s unbinding request - ignored" % uuid)
         else:
             props = self.interfaces[uuid]
             iface_idx = props['iface_idx']
-            if if_type != props['bind_type']:
-                LOG.error("Incorrect unbinding port type:%s "
-                          "request received" % if_type)
-                LOG.error("Expected type:%s, Received Type:%s " 
-                          % (props['bind_type'], if_type))
-                return 1
             LOG.debug("unbinding port %s, recorded as type %s " % 
                        (uuid, props['bind_type']))
             # We no longer need this interface.  Specifically if it's
@@ -406,14 +401,17 @@ class VPPForwarder(object):
             else:
                 LOG.error('Unknown port type %s during unbind' % 
                             props['bind_type'])
+                return
             #Delete the interface from network data
-            net_data = self.network_on_host(net_id)
+            net_data = self.network_on_host(props['network_id'])
             net_data['interfaces'].remove(self.interfaces[uuid])
+            LOG.debug("Removed port(%s) from used interfaces of net_data(%s)" %
+                        (uuid, str(net_data)))
             #Delete structures of unused network and free up resources
             if not net_data['interfaces']:
                 LOG.debug("Deleting unused network resources for network: %s" 
                           % net_data)
-                self.delete_network_on_host(net_id)
+                self.delete_network_on_host(props['network_id'])
 
 
 
@@ -440,8 +438,8 @@ class EtcdListener(object):
         pass
 
     # The vppf bits
-    def unbind(self, id, binding_type, network_id):
-        self.vppf.unbind_interface_on_host(id, binding_type, network_id)
+    def unbind(self, id):
+        self.vppf.unbind_interface_on_host(id)
 
     def bind(self, id, binding_type, mac_address, physnet, 
         network_type, segmentation_id, network_id):
@@ -484,10 +482,9 @@ class EtcdListener(object):
 
                 if m:
                     port = m.group(1)
-                    data = json.loads(rv.value)
                     if rv.action == 'delete':
                         # Removing key == desire to unbind
-                        self.unbind(port, data['binding_type'], data['network_id'])
+                        self.unbind(port)
                         try:
                             self.etcd_client.delete(LEADIN + '/state/%s/ports/%s'
                                                      % (self.host, port))
@@ -496,6 +493,7 @@ class EtcdListener(object):
                             pass
                     else:
                         # Create or update == bind
+                        data = json.loads(rv.value)
                         props = self.bind(
                                   port,
                                   data['binding_type'],
