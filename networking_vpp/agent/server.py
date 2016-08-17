@@ -43,6 +43,7 @@ from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
+from urllib3.exceptions import ReadTimeoutError
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -512,6 +513,8 @@ class EtcdListener(object):
 
             except etcd.EtcdWatchTimedOut:
                 # This is normal
+                pass
+            except ReadTimeoutError:
                 pass
             except Exception, e:
                 LOG.error('etcd threw exception %s' % traceback.format_exc(e))

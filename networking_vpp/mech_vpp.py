@@ -32,6 +32,7 @@ from neutron import manager
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron_lib import constants as nl_const
+from urllib3.exceptions import ReadTimeoutError 
 
 eventlet.monkey_patch()
 
@@ -233,11 +234,10 @@ class VPPMechanismDriver(api.MechanismDriver):
                           {
                               'port': port_context.current,
                               'host': port_context.original_host,
-                              'binding_type': binding_type
                           })
                 self.communicator.unbind(port_context.current,
-                                         port_context.original_host,
-                                         binding_type)
+                                         port_context.original_host
+                                         )
 
     def delete_port_postcommit(self, port_context):
         port = port_context.current
@@ -245,14 +245,13 @@ class VPPMechanismDriver(api.MechanismDriver):
         bind_type = self.get_vif_type(port_context)
         LOG.debug('ML2_VPP: delete_port_postcommit, port is %s' % str(port))
         LOG.debug("ML2_VPP: Sending unbind request to agent communicator for port %(port)s"
-                          "on host %(host)s, bind_type %(bind_type)s",
+                          "on host %(host)s",
                           {
                           'port': port,
                           'host': host,
-                          'bind_type': bind_type,
                           }                         
                     )
-        self.communicator.unbind(port, host, bind_type)
+        self.communicator.unbind(port, host)
 
 
 
@@ -267,7 +266,7 @@ class AgentCommunicator(object):
         pass
 
     @abstractmethod
-    def unbind(self, port, host, binding_type):
+    def unbind(self, port, host):
         pass
 
     def notify_bound(self, port_id, host):
@@ -346,7 +345,7 @@ class ThreadedAgentCommunicator(AgentCommunicator):
                   })
         self.queue.put(['bind', port, segment, host, binding_type])
 
-    def unbind(self, port, host, binding_type):
+    def unbind(self, port, host):
         """Queue up an unbind message for sending.
 
         This is called in the sequence of a REST call and should take
@@ -358,16 +357,15 @@ class ThreadedAgentCommunicator(AgentCommunicator):
                   {
                       'port': port,
                       'host': host,
-                      'type': binding_type
                   })
-        self.queue.put(['unbind', port, host, binding_type])
+        self.queue.put(['unbind', port, host])
 
     @abstractmethod
     def send_bind(self, port, segment, host, binding_type):
         pass
 
     @abstractmethod
-    def send_unbind(self, port, host, binding_type):
+    def send_unbind(self, port, host):
         pass
 
 
@@ -431,7 +429,7 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
         port_key = self.port_path(host, port)
         port_val = json.dumps(data)
         LOG.debug("writing port key:%s to etcd with val: %s" % (port_key, port_val))
-        self.etcd.write(port_key,port_val)
+        self.etcd.write(port_key, port_val)
 
     def send_unbind(self, port, host):
         port_key = self.port_path(host, port)
@@ -473,6 +471,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                         # TODO(ijw) there are probably more events to notify
                         pass
                     else:
+                        LOG.debug("ML2_VPP: notifying port(%s) bound for host(%s) " %
+                                   (port, host))
                         self.notify_bound(port, host)
                 else:
                     # Matches a port key, gets host and uuid
@@ -493,6 +493,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                             LOG.warn('Unexpected key change in etcd port feedback')
             except etcd.EtcdWatchTimedOut:
                 # this is normal
+                pass
+            except ReadTimeoutError:
                 pass
             except Exception, e:
                 LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
