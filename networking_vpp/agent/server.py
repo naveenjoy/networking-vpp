@@ -40,10 +40,10 @@ import vpp
 from networking_vpp import config_opts
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
+from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
-from urllib3.exceptions import ReadTimeoutError
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -200,8 +200,7 @@ class VPPForwarder(object):
                                'network_type': net_type,
                                'segmentation_id': seg_id,
                                'network_name' : net_name,
-                               'interfaces' : [], #List of bound vpp
-                                                  #ifaces[{props}]
+                               'interfaces' : set(), #set of bound ports
                                   }
             LOG.debug('Created network UUID:%s-%s ' 
                       % (net_uuid, self.nets[net_uuid]))
@@ -226,6 +225,7 @@ class VPPForwarder(object):
                 self.vpp.delete_bridge_domain(bridge_domain)
             if if_upstream_idx:
                 self.vpp.ifdown(if_upstream_idx)
+            self.nets.pop(net_uuid, None)
         else:
             LOG.error("Delete Network: network is unknown "
                              "to agent")
@@ -359,7 +359,7 @@ class VPPForwarder(object):
             props = self.create_interface_on_host(if_type, uuid, mac)
             props['network_id'] = net_id
             iface_idx = props['iface_idx']
-            net_data['interfaces'].append(self.interfaces[uuid])
+            net_data['interfaces'].add(uuid)
             self.vpp.ifup(iface_idx)
             self.vpp.add_to_bridge(net_br_idx, iface_idx)
             LOG.debug('Bound vpp interface with sw_indx:%s '
@@ -404,7 +404,7 @@ class VPPForwarder(object):
                 return
             #Delete the interface from network data
             net_data = self.network_on_host(props['network_id'])
-            net_data['interfaces'].remove(self.interfaces[uuid])
+            net_data['interfaces'].discard(uuid)
             LOG.debug("Removed port(%s) from used interfaces of net_data(%s)" %
                         (uuid, str(net_data)))
             #Delete structures of unused network and free up resources
@@ -453,6 +453,39 @@ class EtcdListener(object):
                      physnet
                      )
 
+    def _sync_state(self):
+        """Sync the port state in etcd with that of vpp
+        return the ModifiedIndex for watching the next event
+        """
+        LOG.debug('Syncing VPP state..')
+        modifiedIndex = None
+        rv = self.etcd_client.read(LEADIN + "/nodes/%s/ports" % self.host,
+                                             recursive=True )
+        for child in rv.children:
+            m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, child.key)
+            if m:
+                port = m.group(1)
+                LOG.debug('Syncing vpp state by binding an existing port:%s' % port)
+                data = json.loads(child.value)
+                #modifiedIndex = child.modifiedIndex
+                props = self.bind(
+                                  port,
+                                  data['binding_type'],
+                                  data['mac_address'],
+                                  data['physnet'],
+                                  data['network_type'],
+                                  data['segmentation_id'],
+                                  data['network_id']
+                                  )
+                if props:
+                    self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
+                                       % (self.host, port), json.dumps(props))
+        if rv:
+            modifiedIndex = rv.modifiedIndex
+            modifiedIndex+=1
+        return modifiedIndex
+
+
     def process_ops(self):
         # TODO(ijw): needs to remember its last tick on reboot, or
         # reconfigure from start (which means that VPP needs it
@@ -460,8 +493,9 @@ class EtcdListener(object):
         physnets = self.physnets.keys()
         for f in physnets:
             self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % (self.host, f), 1)
-
+        self._sync_state()
         tick = None
+        LOG.debug("Starting watch on ports key from Index: %s" % tick)
         while True:
             # The key that indicates to people that we're alive
             # (not that they care)
@@ -503,16 +537,15 @@ class EtcdListener(object):
                                   data['segmentation_id'],
                                   data['network_id']
                                   )
-                        self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
+                        if props:
+                            self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
                                             % (self.host, port), json.dumps(props))
 
                 else:
                     LOG.warn('Unexpected key change in etcd port feedback')
 
-            except etcd.EtcdWatchTimedOut:
+            except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
                 # This is normal
-                pass
-            except ReadTimeoutError:
                 pass
             except Exception, e:
                 LOG.error('etcd threw exception %s' % traceback.format_exc(e))
@@ -520,10 +553,21 @@ class EtcdListener(object):
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
 
+class VPPService(object):
+    "Provides functionality to manage the VPP service"
+    
+    @classmethod
+    def restart(cls):
+        cmd = [ 'service', 'vpp', 'restart']
+        return utils.execute(cmd, run_as_root=True)
 
 def main():
     cfg.CONF(sys.argv[1:])
     logging.setup(cfg.CONF, 'VPPAgent')
+    LOG.debug('Restarting VPP..')
+    VPPService.restart()
+    #TODO(najoy). check if VPP's state is actually up
+    time.sleep(5)  #wait for VPP to become active
     # If the user and/or group are specified in config file, we will use
     # them as configured; otherwise we try to use defaults depending on
     # distribution. Currently only supporting ubuntu and redhat.
@@ -547,7 +591,6 @@ def main():
                 LOG.error("Could not parse physnet to interface mapping "
                           "check the format in the config file: "
                           "physnets = physnet1:<interface1>,physnet2:<interface2>")
-
     vppf = VPPForwarder(physnets,
                         vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
                         vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,

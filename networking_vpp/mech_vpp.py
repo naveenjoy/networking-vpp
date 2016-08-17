@@ -32,7 +32,6 @@ from neutron import manager
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron_lib import constants as nl_const
-from urllib3.exceptions import ReadTimeoutError 
 
 eventlet.monkey_patch()
 
@@ -443,9 +442,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             # Thrown when the directory already exists, which is fine
             pass
 
-    def _return_worker(self):
-    # TODO this should begin by syncing state, 
-    #particularly of agents but also of any expected, unreceived notifications
+    def _update_physnets(self):
+        self.physical_networks.clear()
         for rv in self.etcd.read(LEADIN, recursive=True).children:
             # Find all known physnets
             m = re.match(LEADIN + '/state/([^/]+)/physnets/([^/]+)$', rv.key)
@@ -453,10 +451,16 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                 host = m.group(1)
                 net = m.group(2)
                 self.physical_networks.add((host, net))
+
+    def _return_worker(self):
+    # TODO this should begin by syncing state, 
+    #particularly of agents but also of any expected, unreceived notifications
         tick = None
         TIMEOUT = 60  # In theory, to prevent long lived stale TCP connections
         while True:
             try:
+                self._update_physnets()
+                LOG.debug("Known physical networks: %s" % self.physical_networks)
                 LOG.debug("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
                 rv = self.etcd.watch(LEADIN + "/state", recursive=True,
                                       index=tick, timeout=TIMEOUT)
@@ -493,8 +497,6 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                             LOG.warn('Unexpected key change in etcd port feedback')
             except etcd.EtcdWatchTimedOut:
                 # this is normal
-                pass
-            except ReadTimeoutError:
                 pass
             except Exception, e:
                 LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
