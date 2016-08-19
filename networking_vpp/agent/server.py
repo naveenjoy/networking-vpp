@@ -221,8 +221,9 @@ class VPPForwarder(object):
                 return
             bridge_domain = net.get('bridge_domain_id', None)
             if_upstream_idx = net.get('if_upstream_idx', None)
-            if bridge_domain:
-                self.vpp.delete_bridge_domain(bridge_domain)
+            #(najoy):Do not delete VPP bridge domain due to re-connectivity issues
+            # if bridge_domain:
+            #     self.vpp.delete_bridge_domain(bridge_domain)
             if if_upstream_idx:
                 self.vpp.ifdown(if_upstream_idx)
             self.nets.pop(net_uuid, None)
