@@ -542,15 +542,20 @@ class EtcdListener(object):
                         if props:
                             self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
                                             % (self.host, port), json.dumps(props))
-
                 else:
                     LOG.warn('Unexpected key change in etcd port feedback')
 
             except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
                 # This is normal
                 pass
+            except etcd.EtcdEventIndexCleared:
+                LOG.info("etcd event index cleared. resetting the watch index")
+                #Reset the watch Index as etcd only keeps a buffer of 1000 events
+                tick = None
+            except etcd.EtcdException as e:
+                LOG.debug('Received an etcd exception: %s' % traceback.format_exc(e))
             except Exception, e:
-                LOG.error('etcd threw exception %s' % traceback.format_exc(e))
+                LOG.error('Agent received an unknown exception %s' % traceback.format_exc(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
