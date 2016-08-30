@@ -455,21 +455,20 @@ class EtcdListener(object):
                      physnet
                      )
 
-    def _sync_state(self):
-        """Sync the port state in etcd with that of vpp
-        return the ModifiedIndex for watching the next event
+    def _sync_state(self, port_key_space):
         """
-        LOG.debug('Syncing VPP state..')
-        modifiedIndex = None
-        rv = self.etcd_client.read(LEADIN + "/nodes/%s/ports" % self.host,
-                                             recursive=True )
+        Sync the port state in etcd with that of vpp
+        return the watch index for the next event
+        """
+        LOG.debug('Syncing VPP port state..')
+        #TODO(najoy): Clean up existing (possibly) stale port states
+        rv = self.etcd_client.read(port_key_space, recursive=True )
         for child in rv.children:
-            m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, child.key)
+            m = re.match(port_key_space + '/([^/]+)$', child.key)
             if m:
                 port = m.group(1)
-                LOG.debug('Syncing vpp state by binding an existing port:%s' % port)
+                LOG.debug('Syncing vpp state by binding existing port:%s' % port)
                 data = json.loads(child.value)
-                #modifiedIndex = child.modifiedIndex
                 props = self.bind(
                                   port,
                                   data['binding_type'],
@@ -481,12 +480,27 @@ class EtcdListener(object):
                                   )
                 if props:
                     self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
-                                       % (self.host, port), json.dumps(props))
-        if rv:
-            modifiedIndex = rv.modifiedIndex
-            modifiedIndex+=1
-        return modifiedIndex
+                                        % (self.host, port), json.dumps(props))
+        return self._recover_etcd_state(port_key_space)
 
+    def _clear_state(self, key_space):
+        """
+        Clear all the keys in the key_space directory
+        """
+        LOG.debug("Clearing key space: %s" % key_space)
+        rv =  self.etcd_client.read(key_space)
+        for child in rv.children:
+            self.etcd_client.delete(child.key)
+
+    def _recover_etcd_state(self, key_space):
+        """
+        Recover the current state of the watching keyspace if we miss all the
+        1000 events. This is done by reading the key_space and re-starting the 
+        watch from etcd_index + 1
+        """
+        LOG.debug("Recovering etcd key space: %s" % key_space)
+        rv = self.etcd_client.read(key_space)
+        return rv.etcd_index + 1
 
     def process_ops(self):
         # TODO(ijw): needs to remember its last tick on reboot, or
@@ -495,9 +509,12 @@ class EtcdListener(object):
         physnets = self.physnets.keys()
         for f in physnets:
             self.etcd_client.write(LEADIN + '/state/%s/physnets/%s' % (self.host, f), 1)
-        self._sync_state()
-        tick = None
-        LOG.debug("Starting watch on ports key from Index: %s" % tick)
+        #Set the port keyspace to watch
+        port_key_space = LEADIN + "/nodes/%s/ports" % self.host
+        state_key_space = LEADIN + "/state/%s/ports" % self.host
+        self._clear_state(state_key_space)
+        tick = self._sync_state(port_key_space)
+        LOG.debug("Starting watch on ports key space from Index: %s" % tick)
         while True:
             # The key that indicates to people that we're alive
             # (not that they care)
@@ -505,7 +522,7 @@ class EtcdListener(object):
                                    1, ttl=3*self.HEARTBEAT)
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                rv = self.etcd_client.watch(LEADIN + "/nodes/%s/ports" % self.host,
+                rv = self.etcd_client.watch(port_key_space,
                                             recursive=True,
                                             index=tick,
                                             timeout=self.HEARTBEAT)
@@ -514,16 +531,14 @@ class EtcdListener(object):
                 tick = rv.modifiedIndex+1
                 LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
                 # Matches a port key, gets host and uuid
-                m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host, rv.key)
-
+                m = re.match(port_key_space + '/([^/]+)$', rv.key)
                 if m:
                     port = m.group(1)
                     if rv.action == 'delete':
                         # Removing key == desire to unbind
                         self.unbind(port)
                         try:
-                            self.etcd_client.delete(LEADIN + '/state/%s/ports/%s'
-                                                     % (self.host, port))
+                            self.etcd_client.delete(port_key_space + '/%s' % port)
                         except etcd.EtcdKeyNotFound:
                             # Gone is fine, if we didn't delete it it's no problem
                             pass
@@ -540,8 +555,8 @@ class EtcdListener(object):
                                   data['network_id']
                                   )
                         if props:
-                            self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
-                                            % (self.host, port), json.dumps(props))
+                            self.etcd_client.write(state_key_space + '/%s'
+                                                   % port, json.dumps(props))
                 else:
                     LOG.warn('Unexpected key change in etcd port feedback')
 
@@ -549,9 +564,10 @@ class EtcdListener(object):
                 # This is normal
                 pass
             except etcd.EtcdEventIndexCleared:
-                LOG.info("etcd event index cleared. resetting the watch index")
+                LOG.debug("etcd event index cleared. recovering the etcd watch index")
                 #Reset the watch Index as etcd only keeps a buffer of 1000 events
-                tick = None
+                tick = self._recover_etcd_state(port_key_space)
+                LOG.debug("Etcd watch index recovered at %s" % tick)
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % traceback.format_exc(e))
             except Exception, e:
