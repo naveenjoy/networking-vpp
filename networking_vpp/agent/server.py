@@ -638,10 +638,7 @@ def main():
                         allow_reconnect=True
                         )
     ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
-    try:
-        ops.process_ops()
-    except Exception:
-        pass
+    ops.process_ops()
 
 
 if __name__ == '__main__':
