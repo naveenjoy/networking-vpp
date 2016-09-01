@@ -60,6 +60,8 @@ class VPPInterface(object):
         except AttributeError as e:
             self.LOG.debug("Unexpected request format.  Error: %s on %s"
                            % (e, t))
+        except TypeError:
+            pass
 
     def get_interfaces(self):
         t = vpp_papi.sw_interface_dump(0, b'ignored')
@@ -103,19 +105,19 @@ class VPPInterface(object):
 
     def create_vhostuser(self, ifpath, mac, qemu_user, qemu_group):
         self.LOG.info('Creating %s as a port' % ifpath)
-        t = vpp_papi.create_vhost_user_if(True,  # is a server?
-                                          str(ifpath),  # unicode not allowed.
-                                          False,  # Who knows what renumber is?
-                                          0,  # custom_dev_instance
-                                          True,  # use custom MAC
-                                          mac_to_bytes(mac)
-                                          )
-        self.LOG.debug("Created vhost user interface object: %s" % str(t))
+        try:
+            t = vpp_papi.create_vhost_user_if(True,  # is a server?
+                                              str(ifpath),  # unicode not allowed.
+                                              False,  # Who knows what renumber is?
+                                              0,  # custom_dev_instance
+                                              True,  # use custom MAC
+                                              mac_to_bytes(mac)
+                                              )
+        except TypeError:
+            pass
         self._check_retval(t)
 
         # The permission that qemu runs as.
-        self.LOG.info('Changing vhostuser interface file permission to %s:%s'
-                      % (qemu_user, qemu_group))
         uid = pwd.getpwnam(qemu_user).pw_uid
         gid = grp.getgrnam(qemu_group).gr_gid
 
@@ -124,11 +126,14 @@ class VPPInterface(object):
 
         return t.sw_if_index
 
+
     def delete_vhostuser(self, idx):
         self.LOG.debug("Deleting VPP interface - index: %s" % idx)
-        t = vpp_papi.delete_vhost_user_if(idx)
-
-        self._check_retval(t)
+        try:
+            t = vpp_papi.delete_vhost_user_if(idx)
+            self._check_retval(t)
+        except TypeError:
+            pass
 
     def disconnect(self):
         vpp_papi.disconnect()

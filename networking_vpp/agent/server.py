@@ -44,6 +44,8 @@ from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
+from urllib3.exceptions import ReadTimeoutError
+from urllib3 import Timeout
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -424,7 +426,8 @@ class EtcdListener(object):
         self.etcd_client = etcd_client
         self.vppf = vppf
         self.physnets = physnets
-        self.HEARTBEAT = 60 # seconds
+        self.CONNECT = 15 # etcd connect timeout
+        self.HEARTBEAT = 20 # read timeout in seconds
         # We need certain directories to exist
         self.mkdir(LEADIN + '/state/%s/ports' % self.host)
         self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
@@ -488,9 +491,12 @@ class EtcdListener(object):
         Clear all the keys in the key_space directory
         """
         LOG.debug("Clearing key space: %s" % key_space)
-        rv =  self.etcd_client.read(key_space)
-        for child in rv.children:
-            self.etcd_client.delete(child.key)
+        try:
+            rv =  self.etcd_client.read(key_space)
+            for child in rv.children:
+                self.etcd_client.delete(child.key)
+        except etcd.EtcdNotFile:
+            pass
 
     def _recover_etcd_state(self, key_space):
         """
@@ -501,6 +507,7 @@ class EtcdListener(object):
         LOG.debug("Recovering etcd key space: %s" % key_space)
         rv = self.etcd_client.read(key_space)
         return rv.etcd_index + 1
+
 
     def process_ops(self):
         # TODO(ijw): needs to remember its last tick on reboot, or
@@ -522,10 +529,13 @@ class EtcdListener(object):
                                    1, ttl=3*self.HEARTBEAT)
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                rv = self.etcd_client.watch(port_key_space,
-                                            recursive=True,
-                                            index=tick,
-                                            timeout=self.HEARTBEAT)
+                rv = self.etcd_client.read(port_key_space,
+                                           recursive=True,
+                                           waitIndex=tick,
+                                           wait=True,
+                                           timeout=Timeout(
+                                                        connect=None,
+                                                        read=None))
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
@@ -569,12 +579,17 @@ class EtcdListener(object):
                 tick = self._recover_etcd_state(port_key_space)
                 LOG.debug("Etcd watch index recovered at %s" % tick)
             except etcd.EtcdException as e:
-                LOG.debug('Received an etcd exception: %s' % traceback.format_exc(e))
-            except Exception, e:
-                LOG.error('Agent received an unknown exception %s' % traceback.format_exc(e))
+                LOG.debug('Received an etcd exception: %s' % type(e))
+            except ReadTimeoutError:
+                LOG.debug('Etcd read timed out')
+            except etcd.EtcdError as e:
+                LOG.debug('Agent received an etcd error: %s' % str(e))
+            except Exception as e:
+                LOG.debug('Agent received exception of type %s' % type(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
+
 
 class VPPService(object):
     "Provides functionality to manage the VPP service"
@@ -585,52 +600,56 @@ class VPPService(object):
         return utils.execute(cmd, run_as_root=True)
 
 def main():
-    cfg.CONF(sys.argv[1:])
-    logging.setup(cfg.CONF, 'VPPAgent')
-    LOG.debug('Restarting VPP..')
-    VPPService.restart()
-    #TODO(najoy). check if VPP's state is actually up
-    time.sleep(5)  #wait for VPP to become active
-    # If the user and/or group are specified in config file, we will use
-    # them as configured; otherwise we try to use defaults depending on
-    # distribution. Currently only supporting ubuntu and redhat.
-    qemu_user = cfg.CONF.ml2_vpp.qemu_user
-    qemu_group = cfg.CONF.ml2_vpp.qemu_group
-    default_user, default_group = get_qemu_default()
-    if not qemu_user:
-        qemu_user = default_user
-    if not qemu_group:
-        qemu_group = default_group
+    try:
+        cfg.CONF(sys.argv[1:])
+        logging.setup(cfg.CONF, 'VPPAgent')
+        LOG.debug('Restarting VPP..')
+        VPPService.restart()
+        #TODO(najoy). check if VPP's state is actually up
+        time.sleep(5)  #wait for VPP to become active
+        # If the user and/or group are specified in config file, we will use
+        # them as configured; otherwise we try to use defaults depending on
+        # distribution. Currently only supporting ubuntu and redhat.
+        qemu_user = cfg.CONF.ml2_vpp.qemu_user
+        qemu_group = cfg.CONF.ml2_vpp.qemu_group
+        default_user, default_group = get_qemu_default()
+        if not qemu_user:
+            qemu_user = default_user
+        if not qemu_group:
+            qemu_group = default_group
 
-    physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
-    LOG.debug('Physnet list: %s' % str(physnet_list))
-    physnets = {}
-    for f in physnet_list:
-        if f:
-            try:
-                (k, v) = f.split(':')
-                physnets[k] = v
-            except:
-                LOG.error("Could not parse physnet to interface mapping "
-                          "check the format in the config file: "
-                          "physnets = physnet1:<interface1>,physnet2:<interface2>")
-    vppf = VPPForwarder(physnets,
-                        vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
-                        vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,
-                        vxlan_vrf=cfg.CONF.ml2_vpp.vxlan_vrf,
-                        qemu_user=qemu_user,
-                        qemu_group=qemu_group)
-    LOG.debug("setting etcd client to host:%s port:%s" % 
-                       (cfg.CONF.ml2_vpp.etcd_host,
-                        cfg.CONF.ml2_vpp.etcd_port,)
-                       )
-    etcd_client = etcd.Client(
-                        host=cfg.CONF.ml2_vpp.etcd_host,
-                        port=cfg.CONF.ml2_vpp.etcd_port,
-                        allow_reconnect=True
-                        )
-    ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
-    ops.process_ops()
+        physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
+        physnets = {}
+        for f in physnet_list:
+            if f:
+                try:
+                    (k, v) = f.split(':')
+                    physnets[k] = v
+                except:
+                    LOG.error("Could not parse physnet to interface mapping "
+                              "check the format in the config file: "
+                              "physnets = physnet1:<interface1>,physnet2:<interface2>")
+        vppf = VPPForwarder(physnets,
+                            vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
+                            vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,
+                            vxlan_vrf=cfg.CONF.ml2_vpp.vxlan_vrf,
+                            qemu_user=qemu_user,
+                            qemu_group=qemu_group)
+        LOG.debug("setting etcd client to host:%s port:%s" % 
+                           (cfg.CONF.ml2_vpp.etcd_host,
+                            cfg.CONF.ml2_vpp.etcd_port,)
+                           )
+        etcd_client = etcd.Client(
+                            host=cfg.CONF.ml2_vpp.etcd_host,
+                            port=cfg.CONF.ml2_vpp.etcd_port,
+                            allow_reconnect=True
+                            )
+        ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
+        ops.process_ops()
+    except TypeError:
+        pass
+    except Exception as e:
+        LOG.debug("Agent received exception: %s" % str(e))
 
 
 if __name__ == '__main__':
