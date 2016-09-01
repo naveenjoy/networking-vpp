@@ -44,8 +44,7 @@ from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
-from requests.packages.urllib3.exceptions import ReadTimeoutError
-from urllib3.exceptions import ReadTimeoutError as ReadTimeoutErrorUrl
+import urllib3
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -533,8 +532,11 @@ class EtcdListener(object):
                                                recursive=True,
                                                waitIndex=tick,
                                                wait=True,
-                                               # timeout=self.HEARTBEAT
+                                               timeout=self.HEARTBEAT
                                               )
+                except urllib3.exceptions.ReadTimeoutError:
+                    LOG.debug("Caught urllib3.exceptions.ReadTimeoutError exception")
+                    continue
                 except Exception as e:
                     LOG.debug("Caught exception:%s" % type(e))
                     continue
@@ -574,8 +576,6 @@ class EtcdListener(object):
 
             except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
                 # This is normal
-                pass
-            except (ReadTimeoutError, ReadTimeoutErrorUrl):
                 pass
             except etcd.EtcdEventIndexCleared:
                 LOG.debug("etcd event index cleared. recovering the etcd watch index")
