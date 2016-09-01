@@ -618,7 +618,6 @@ def main():
         qemu_group = default_group
 
     physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
-    LOG.debug('Physnet list: %s' % str(physnet_list))
     physnets = {}
     for f in physnet_list:
         if f:
