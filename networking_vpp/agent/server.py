@@ -600,51 +600,56 @@ class VPPService(object):
         return utils.execute(cmd, run_as_root=True)
 
 def main():
-    cfg.CONF(sys.argv[1:])
-    logging.setup(cfg.CONF, 'VPPAgent')
-    LOG.debug('Restarting VPP..')
-    VPPService.restart()
-    #TODO(najoy). check if VPP's state is actually up
-    time.sleep(5)  #wait for VPP to become active
-    # If the user and/or group are specified in config file, we will use
-    # them as configured; otherwise we try to use defaults depending on
-    # distribution. Currently only supporting ubuntu and redhat.
-    qemu_user = cfg.CONF.ml2_vpp.qemu_user
-    qemu_group = cfg.CONF.ml2_vpp.qemu_group
-    default_user, default_group = get_qemu_default()
-    if not qemu_user:
-        qemu_user = default_user
-    if not qemu_group:
-        qemu_group = default_group
+    try:
+        cfg.CONF(sys.argv[1:])
+        logging.setup(cfg.CONF, 'VPPAgent')
+        LOG.debug('Restarting VPP..')
+        VPPService.restart()
+        #TODO(najoy). check if VPP's state is actually up
+        time.sleep(5)  #wait for VPP to become active
+        # If the user and/or group are specified in config file, we will use
+        # them as configured; otherwise we try to use defaults depending on
+        # distribution. Currently only supporting ubuntu and redhat.
+        qemu_user = cfg.CONF.ml2_vpp.qemu_user
+        qemu_group = cfg.CONF.ml2_vpp.qemu_group
+        default_user, default_group = get_qemu_default()
+        if not qemu_user:
+            qemu_user = default_user
+        if not qemu_group:
+            qemu_group = default_group
 
-    physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
-    physnets = {}
-    for f in physnet_list:
-        if f:
-            try:
-                (k, v) = f.split(':')
-                physnets[k] = v
-            except:
-                LOG.error("Could not parse physnet to interface mapping "
-                          "check the format in the config file: "
-                          "physnets = physnet1:<interface1>,physnet2:<interface2>")
-    vppf = VPPForwarder(physnets,
-                        vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
-                        vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,
-                        vxlan_vrf=cfg.CONF.ml2_vpp.vxlan_vrf,
-                        qemu_user=qemu_user,
-                        qemu_group=qemu_group)
-    LOG.debug("setting etcd client to host:%s port:%s" % 
-                       (cfg.CONF.ml2_vpp.etcd_host,
-                        cfg.CONF.ml2_vpp.etcd_port,)
-                       )
-    etcd_client = etcd.Client(
-                        host=cfg.CONF.ml2_vpp.etcd_host,
-                        port=cfg.CONF.ml2_vpp.etcd_port,
-                        allow_reconnect=True
-                        )
-    ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
-    ops.process_ops()
+        physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
+        physnets = {}
+        for f in physnet_list:
+            if f:
+                try:
+                    (k, v) = f.split(':')
+                    physnets[k] = v
+                except:
+                    LOG.error("Could not parse physnet to interface mapping "
+                              "check the format in the config file: "
+                              "physnets = physnet1:<interface1>,physnet2:<interface2>")
+        vppf = VPPForwarder(physnets,
+                            vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
+                            vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,
+                            vxlan_vrf=cfg.CONF.ml2_vpp.vxlan_vrf,
+                            qemu_user=qemu_user,
+                            qemu_group=qemu_group)
+        LOG.debug("setting etcd client to host:%s port:%s" % 
+                           (cfg.CONF.ml2_vpp.etcd_host,
+                            cfg.CONF.ml2_vpp.etcd_port,)
+                           )
+        etcd_client = etcd.Client(
+                            host=cfg.CONF.ml2_vpp.etcd_host,
+                            port=cfg.CONF.ml2_vpp.etcd_port,
+                            allow_reconnect=True
+                            )
+        ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
+        ops.process_ops()
+    except TypeError:
+        pass
+    except Exception as e:
+        LOG.debug("Agent received exception: %s" % str(e))
 
 
 if __name__ == '__main__':
