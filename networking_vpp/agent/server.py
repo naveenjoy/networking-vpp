@@ -578,9 +578,9 @@ class EtcdListener(object):
                 tick = self._recover_etcd_state(port_key_space)
                 LOG.debug("Etcd watch index recovered at %s" % tick)
             except etcd.EtcdException as e:
-                LOG.debug('Received an etcd exception: %s' % traceback.format_exc(e))
-            except Exception, e:
-                LOG.error('Agent received an unknown exception %s' % traceback.format_exc(e))
+                LOG.debug('Received an etcd exception: %s' % type(e))
+            except Exception as e:
+                LOG.error('Agent received an unknown exception %s' % type(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
