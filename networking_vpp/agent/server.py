@@ -426,8 +426,8 @@ class EtcdListener(object):
         self.etcd_client = etcd_client
         self.vppf = vppf
         self.physnets = physnets
-        self.CONNECT = 30 # etcd connect timeout
-        self.HEARTBEAT = 60 # read timeout in seconds
+        self.CONNECT = 15 # etcd connect timeout
+        self.HEARTBEAT = 20 # read timeout in seconds
         # We need certain directories to exist
         self.mkdir(LEADIN + '/state/%s/ports' % self.host)
         self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
@@ -534,8 +534,8 @@ class EtcdListener(object):
                                            waitIndex=tick,
                                            wait=True,
                                            timeout=Timeout(
-                                                        connect=self.CONNECT,
-                                                        read=self.HEARTBEAT))
+                                                        connect=None,
+                                                        read=None))
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
