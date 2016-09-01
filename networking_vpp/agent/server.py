@@ -578,6 +578,8 @@ class EtcdListener(object):
                 LOG.debug('Received an etcd exception: %s' % type(e))
             except urllib3.exceptions.ReadTimeoutError:
                 pass
+            except etcd.EtcdError as e:
+                LOG.debug('Agent received an etcd error: %s' % str(e))
             except Exception as e:
                 LOG.debug('Agent received exception of type %s' % type(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
