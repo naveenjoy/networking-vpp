@@ -527,11 +527,13 @@ class EtcdListener(object):
                                    1, ttl=3*self.HEARTBEAT)
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                rv = self.etcd_client.watch(port_key_space,
-                                            recursive=True,
-                                            index=tick,
-                                            timeout=self.HEARTBEAT
-                                            )
+                rv = self.etcd_client.read(port_key_space,
+                                           recursive=True,
+                                           waitIndex=tick,
+                                           wait=True,
+                                            # timeout=self.HEARTBEAT
+                                           timeout=0
+                                           )
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
@@ -577,7 +579,7 @@ class EtcdListener(object):
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % type(e))
             except ReadTimeoutError:
-                LOG.debug('Caught ReadTimeoutError Exception')
+                LOG.debug('Received a ReadTimeoutError Exception')
             except etcd.EtcdError as e:
                 LOG.debug('Agent received an etcd error: %s' % str(e))
             except Exception as e:
