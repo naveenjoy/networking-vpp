@@ -488,9 +488,12 @@ class EtcdListener(object):
         Clear all the keys in the key_space directory
         """
         LOG.debug("Clearing key space: %s" % key_space)
-        rv =  self.etcd_client.read(key_space)
-        for child in rv.children:
-            self.etcd_client.delete(child.key)
+        try:
+            rv =  self.etcd_client.read(key_space)
+            for child in rv.children:
+                self.etcd_client.delete(child.key)
+        except etcd.EtcdNotFile:
+            pass
 
     def _recover_etcd_state(self, key_space):
         """
