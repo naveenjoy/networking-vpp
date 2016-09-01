@@ -576,6 +576,8 @@ class EtcdListener(object):
                 LOG.debug("Etcd watch index recovered at %s" % tick)
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % type(e))
+            except urllib3.exceptions.ReadTimeoutError:
+                pass
             except Exception as e:
                 LOG.debug('Agent received exception of type %s' % type(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
