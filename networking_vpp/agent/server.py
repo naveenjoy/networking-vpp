@@ -425,7 +425,7 @@ class EtcdListener(object):
         self.etcd_client = etcd_client
         self.vppf = vppf
         self.physnets = physnets
-        self.HEARTBEAT = 15 # seconds
+        self.HEARTBEAT = 60 # seconds
         # We need certain directories to exist
         self.mkdir(LEADIN + '/state/%s/ports' % self.host)
         self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
@@ -528,11 +528,10 @@ class EtcdListener(object):
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
                 rv = self.etcd_client.read(port_key_space,
-                                           recursive=True,
-                                           waitIndex=tick,
-                                           wait=True,
-                                            # timeout=self.HEARTBEAT
-                                           timeout=0
+                                           recursive = True,
+                                           waitIndex = tick,
+                                           wait = True,
+                                           timeout = self.HEARTBEAT
                                            )
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
@@ -579,7 +578,7 @@ class EtcdListener(object):
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % type(e))
             except ReadTimeoutError:
-                LOG.debug('Received a ReadTimeoutError Exception')
+                LOG.debug('Etcd read timed out')
             except etcd.EtcdError as e:
                 LOG.debug('Agent received an etcd error: %s' % str(e))
             except Exception as e:
