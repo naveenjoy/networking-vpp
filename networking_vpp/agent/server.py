@@ -528,13 +528,16 @@ class EtcdListener(object):
                                    1, ttl=3*self.HEARTBEAT)
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                rv = self.etcd_client.read(
-                                        port_key_space,
-                                        recursive=True,
-                                        waitIndex=tick,
-                                        wait=True,
-                                        # timeout=self.HEARTBEAT
-                                        )
+                try:
+                    rv = self.etcd_client.read(port_key_space,
+                                               recursive=True,
+                                               waitIndex=tick,
+                                               wait=True,
+                                               # timeout=self.HEARTBEAT
+                                              )
+                except Exception as e:
+                    LOG.debug("Caught exception:%s" % type(e))
+                    continue
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
