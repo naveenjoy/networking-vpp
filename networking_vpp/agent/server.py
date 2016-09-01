@@ -527,19 +527,11 @@ class EtcdListener(object):
                                    1, ttl=3*self.HEARTBEAT)
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                try:
-                    rv = self.etcd_client.read(port_key_space,
-                                               recursive=True,
-                                               waitIndex=tick,
-                                               wait=True,
-                                               timeout=self.HEARTBEAT
-                                              )
-                except urllib3.exceptions.ReadTimeoutError:
-                    LOG.debug("Caught urllib3.exceptions.ReadTimeoutError exception")
-                    continue
-                except Exception as e:
-                    LOG.debug("Caught exception:%s" % type(e))
-                    continue
+                rv = self.etcd_client.watch(port_key_space,
+                                            recursive=True,
+                                            index=tick,
+                                            timeout=self.HEARTBEAT
+                                            )                    
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
@@ -585,7 +577,7 @@ class EtcdListener(object):
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % type(e))
             except Exception as e:
-                LOG.error('Agent received an unknown exception %s' % type(e))
+                LOG.debug('Agent received exception of type %s' % type(e))
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
