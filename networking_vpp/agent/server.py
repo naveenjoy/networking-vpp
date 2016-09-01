@@ -45,6 +45,7 @@ from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
 from requests.packages.urllib3.exceptions import ReadTimeoutError
+from urllib3.exceptions import ReadTimeoutError as ReadTimeoutErrorUrl
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -567,7 +568,7 @@ class EtcdListener(object):
             except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
                 # This is normal
                 pass
-            except ReadTimeoutError:
+            except (ReadTimeoutError, ReadTimeoutErrorUrl):
                 pass
             except etcd.EtcdEventIndexCleared:
                 LOG.debug("etcd event index cleared. recovering the etcd watch index")
