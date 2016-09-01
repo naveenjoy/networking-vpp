@@ -60,6 +60,8 @@ class VPPInterface(object):
         except AttributeError as e:
             self.LOG.debug("Unexpected request format.  Error: %s on %s"
                            % (e, t))
+        except TypeError:
+            pass
 
     def get_interfaces(self):
         t = vpp_papi.sw_interface_dump(0, b'ignored')
@@ -126,9 +128,11 @@ class VPPInterface(object):
 
     def delete_vhostuser(self, idx):
         self.LOG.debug("Deleting VPP interface - index: %s" % idx)
-        t = vpp_papi.delete_vhost_user_if(idx)
-
-        self._check_retval(t)
+        try:
+            t = vpp_papi.delete_vhost_user_if(idx)
+            self._check_retval(t)
+        except TypeError:
+            pass
 
     def disconnect(self):
         vpp_papi.disconnect()
