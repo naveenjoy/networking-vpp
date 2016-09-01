@@ -45,7 +45,6 @@ from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
 import urllib3
-from urllib3.exceptions import ReadTimeoutError
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -577,7 +576,7 @@ class EtcdListener(object):
                 LOG.debug("Etcd watch index recovered at %s" % tick)
             except etcd.EtcdException as e:
                 LOG.debug('Received an etcd exception: %s' % type(e))
-            except (urllib3.exceptions.ReadTimeoutError, ReadTimeoutError):
+            except urllib3.exceptions.ReadTimeoutError:
                 LOG.debug('Caught ReadTimeoutError Exception')
             except etcd.EtcdError as e:
                 LOG.debug('Agent received an etcd error: %s' % str(e))
