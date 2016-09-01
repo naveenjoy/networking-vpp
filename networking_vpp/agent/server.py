@@ -520,70 +520,68 @@ class EtcdListener(object):
         self._clear_state(state_key_space)
         tick = self._sync_state(port_key_space)
         LOG.debug("Starting watch on ports key space from Index: %s" % tick)
-        try:
-            while True:
-                # The key that indicates to people that we're alive
-                # (not that they care)
-                self.etcd_client.write(LEADIN + '/state/%s/alive' % self.host,
-                                       1, ttl=3*self.HEARTBEAT)
-                try:
-                    LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
-                    rv = self.etcd_client.watch(port_key_space,
-                                                recursive=True,
-                                                index=tick,
-                                                timeout=self.HEARTBEAT
-                                                )
-                    LOG.debug('watch received %s on %s at tick %s with data %s' %
-                               (rv.action, rv.key, rv.modifiedIndex, rv.value))
-                    tick = rv.modifiedIndex+1
-                    LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
-                    # Matches a port key, gets host and uuid
-                    m = re.match(port_key_space + '/([^/]+)$', rv.key)
-                    if m:
-                        port = m.group(1)
-                        if rv.action == 'delete':
-                            # Removing key == desire to unbind
-                            self.unbind(port)
-                            try:
-                                self.etcd_client.delete(port_key_space + '/%s' % port)
-                            except etcd.EtcdKeyNotFound:
-                                # Gone is fine, if we didn't delete it it's no problem
-                                pass
-                        else:
-                            # Create or update == bind
-                            data = json.loads(rv.value)
-                            props = self.bind(
-                                      port,
-                                      data['binding_type'],
-                                      data['mac_address'],
-                                      data['physnet'],
-                                      data['network_type'],
-                                      data['segmentation_id'],
-                                      data['network_id']
-                                      )
-                            if props:
-                                self.etcd_client.write(state_key_space + '/%s'
-                                                       % port, json.dumps(props))
+        while True:
+            # The key that indicates to people that we're alive
+            # (not that they care)
+            self.etcd_client.write(LEADIN + '/state/%s/alive' % self.host,
+                                   1, ttl=3*self.HEARTBEAT)
+            try:
+                LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
+                rv = self.etcd_client.watch(port_key_space,
+                                            recursive=True,
+                                            index=tick,
+                                            timeout=self.HEARTBEAT
+                                            )
+                LOG.debug('watch received %s on %s at tick %s with data %s' %
+                           (rv.action, rv.key, rv.modifiedIndex, rv.value))
+                tick = rv.modifiedIndex+1
+                LOG.debug("ML2_VPP(%s): thread active" % self.__class__.__name__)
+                # Matches a port key, gets host and uuid
+                m = re.match(port_key_space + '/([^/]+)$', rv.key)
+                if m:
+                    port = m.group(1)
+                    if rv.action == 'delete':
+                        # Removing key == desire to unbind
+                        self.unbind(port)
+                        try:
+                            self.etcd_client.delete(port_key_space + '/%s' % port)
+                        except etcd.EtcdKeyNotFound:
+                            # Gone is fine, if we didn't delete it it's no problem
+                            pass
                     else:
-                        LOG.warn('Unexpected key change in etcd port feedback')
+                        # Create or update == bind
+                        data = json.loads(rv.value)
+                        props = self.bind(
+                                  port,
+                                  data['binding_type'],
+                                  data['mac_address'],
+                                  data['physnet'],
+                                  data['network_type'],
+                                  data['segmentation_id'],
+                                  data['network_id']
+                                  )
+                        if props:
+                            self.etcd_client.write(state_key_space + '/%s'
+                                                   % port, json.dumps(props))
+                else:
+                    LOG.warn('Unexpected key change in etcd port feedback')
 
-                except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
-                    # This is normal
-                    pass
-                except etcd.EtcdEventIndexCleared:
-                    LOG.debug("etcd event index cleared. recovering the etcd watch index")
-                    #Reset the watch Index as etcd only keeps a buffer of 1000 events
-                    tick = self._recover_etcd_state(port_key_space)
-                    LOG.debug("Etcd watch index recovered at %s" % tick)
-                except etcd.EtcdException as e:
-                    LOG.debug('Received an etcd exception: %s' % type(e))
-                # except Exception as e:
-                #     LOG.debug('Agent received exception of type %s' % type(e))
-                #     time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
-                    # Should be specific to etcd faults, should have sensible behaviour
-                    # Don't just kill the thread...
-        except Exception as e:
-            LOG.debug('Agent received exception: %s' % str(e))
+            except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
+                # This is normal
+                pass
+            except etcd.EtcdEventIndexCleared:
+                LOG.debug("etcd event index cleared. recovering the etcd watch index")
+                #Reset the watch Index as etcd only keeps a buffer of 1000 events
+                tick = self._recover_etcd_state(port_key_space)
+                LOG.debug("Etcd watch index recovered at %s" % tick)
+            except etcd.EtcdException as e:
+                LOG.debug('Received an etcd exception: %s' % type(e))
+            except Exception as e:
+                LOG.debug('Agent received exception of type %s' % type(e))
+                time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
+                # Should be specific to etcd faults, should have sensible behaviour
+                # Don't just kill the thread...
+
 
 class VPPService(object):
     "Provides functionality to manage the VPP service"
