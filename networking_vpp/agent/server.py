@@ -577,15 +577,13 @@ class EtcdListener(object):
                     LOG.debug("Etcd watch index recovered at %s" % tick)
                 except etcd.EtcdException as e:
                     LOG.debug('Received an etcd exception: %s' % type(e))
-                except Exception as e:
-                    LOG.debug('Agent received exception of type %s' % type(e))
-                    time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
+                # except Exception as e:
+                #     LOG.debug('Agent received exception of type %s' % type(e))
+                #     time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                     # Should be specific to etcd faults, should have sensible behaviour
                     # Don't just kill the thread...
         except Exception as e:
-            pass # This is to catch any wierd exceptions such as the
-            # ReadTimeOutException that is being thrown by inner
-            # loop
+            LOG.debug('Agent received exception: %s' % str(e))
 
 class VPPService(object):
     "Provides functionality to manage the VPP service"
