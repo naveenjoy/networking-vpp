@@ -507,6 +507,7 @@ class EtcdListener(object):
         rv = self.etcd_client.read(key_space)
         return rv.etcd_index + 1
 
+
     def process_ops(self):
         # TODO(ijw): needs to remember its last tick on reboot, or
         # reconfigure from start (which means that VPP needs it
@@ -530,7 +531,8 @@ class EtcdListener(object):
                 rv = self.etcd_client.watch(port_key_space,
                                             recursive=True,
                                             index=tick,
-                                            timeout=self.HEARTBEAT)
+                                            # timeout=self.HEARTBEAT
+                                            )
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
