@@ -45,6 +45,7 @@ from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
 from urllib3.exceptions import ReadTimeoutError
+from urllib3 import Timeout
 
 LOG = logging.getLogger(__name__)
 ######################################################################
@@ -425,7 +426,8 @@ class EtcdListener(object):
         self.etcd_client = etcd_client
         self.vppf = vppf
         self.physnets = physnets
-        self.HEARTBEAT = 60 # seconds
+        self.CONNECT = 30 # etcd connect timeout
+        self.HEARTBEAT = 60 # read timeout in seconds
         # We need certain directories to exist
         self.mkdir(LEADIN + '/state/%s/ports' % self.host)
         self.mkdir(LEADIN + '/nodes/%s/ports' % self.host)
@@ -528,11 +530,12 @@ class EtcdListener(object):
             try:
                 LOG.debug("ML2_VPP(%s): thread watching" % self.__class__.__name__)
                 rv = self.etcd_client.read(port_key_space,
-                                           recursive = True,
-                                           waitIndex = tick,
-                                           wait = True,
-                                           timeout = self.HEARTBEAT
-                                           )
+                                           recursive=True,
+                                           waitIndex=tick,
+                                           wait=True,
+                                           timeout=Timeout(
+                                                        connect=self.CONNECT,
+                                                        read=self.HEARTBEAT))
                 LOG.debug('watch received %s on %s at tick %s with data %s' %
                            (rv.action, rv.key, rv.modifiedIndex, rv.value))
                 tick = rv.modifiedIndex+1
