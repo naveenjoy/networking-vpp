@@ -83,6 +83,7 @@ The following neutron features are supported in the 16.09 release of the network
 # Devstack Settings:
 
 Use the devstack mitaka release with the below settings to stack the networking-vpp driver.
+The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd cluster member. As of the 16.09 release, only a single member etcd cluster is supported. The ETCD_PORT is the etcd client port.
 
 Enable appropriate services
 
@@ -98,7 +99,7 @@ enable_service q-l3
 
 enable_service q-meta
 
-#ML2 driver specific settings (sample)
+
 
 enable_plugin networking-vpp  < URL of the networking-vpp repo >
 
@@ -114,12 +115,7 @@ ML2_VLAN_RANGES=physnet1: 100:200
 
 MECH_VPP_PHYSNETLIST=physnet1:TenGigabitEthernetb/0/0
 
-#The host on which the etcd service is accessible by clients.This is the IP address or
-name of the advertise-client-url setting of the etcd cluster member. As of this initial release only a single member etcd cluster is supported.
-
 ETCD_HOST=${ETCD_HOST}
-
-#The port on which the etcd service is accessible by clients
 
 ETCD_PORT=${ETCD_PORT}
 
