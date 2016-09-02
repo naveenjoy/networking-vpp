@@ -20,9 +20,9 @@ The software architecture of the ML2 driver consists of the following main compo
 
 2) The VPP agent, which runs on each hypervisor and programs the VPP data plane.
 
-3) An etcd distributed key-value store for storing agent state and for communication between the driver and agent. 
+3) An etcd distributed key-value store for storing agent state and communication between the driver and agent. 
 
-4) The VPP switch platform, a high performance packet-processing stack running on each hypervisor in the userspace. 
+4) The VPP switch platform, a high performance packet-processing stack, running on each hypervisor in the userspace. 
   	
 # The vhost-user VIF type
 
@@ -31,7 +31,8 @@ In order to fully leverage the high performance packet processing technology use
 Prerequisites for vhost-user:
  	
 1)	Ensure that hugepages are enabled in the kernel command line and intel_iommu is set to pt. For instance, to enable 2048 2M hugepages, add the below line to /etc/default/grub for GRUB_CMDLINE_LINUX
-intel_iommu=pt default_hugepagesz=2M hugepagesz=2M hugepages=2048
+
+    intel_iommu=pt default_hugepagesz=2M hugepagesz=2M hugepages=2048
 
 2)	Build and install the VPP Platform and its python API bindings
     Refer to: http://wiki.fd.io/view/VPP (Building and Installing a VPP Package)
@@ -50,8 +51,9 @@ When an instance is spawned by nova-compute, it calls neutron to bind the port. 
 
 # Networking-vpp driver
 
-The class VPPMechanismDriver implements the ML2 plugin framework methods for handling neutron port level operations such as bindings, updates and deletes. When a neutron port is updated, if the networking-vpp driver is responsible for binding the port, it tells the VPP agent running on the hypervisor that it has work to do i.e. to program the VPP data plane. Due to the distributed nature of the system, the driver first logs this requirement to a journal (ML2 pre-commit phase) and then it notifies a background thread to read the journal entries and create a port key in etcd. This port key is created in a directory setup for storing the port information for the node. The layout for storing port information in etcd is as follows:
-  LEADIN=/networking-vpp
+The class VPPMechanismDriver implements the ML2 plugin framework methods for handling neutron port level operations such as bindings, updates and deletes. When a neutron port is updated, if the networking-vpp driver is responsible for binding the port, it tells the VPP agent running on the hypervisor that it has work to do i.e. to program the VPP data plane. Due to the distributed nature of the system, the driver first logs this requirement to a journal (ML2 pre-commit phase) and then it notifies a background thread to read the journal entries and create the port key/values in etcd. This port key is created in a directory setup for storing the port information for the node. The layout for storing port information in etcd is as follows:
+
+  Variable LEADIN=/networking-vpp
   
   LEADIN/nodes – subdirs are compute nodes
 
@@ -62,7 +64,7 @@ The class VPPMechanismDriver implements the ML2 plugin framework methods for han
 
 The VPP agent running on the node watches the corresponding node directory within etcd recursively for work to do. When it receives a notification, it performs the action by programming the VPP data plane and writes the return state of the port into etcd. 
 
-The ML2 driver has a thread that polls for the return state of the port created in VPP. The return state information is stored in etcd using the below directory structure.
+The ML2 driver runs a thread that polls for the return state of the port created in VPP. The return state information is stored in etcd using the below directory structure.
 
    LEADIN/state/nodes/X, where X=compute node name
 
@@ -75,7 +77,7 @@ The ML2 driver has a thread that polls for the return state of the port created 
 A key in the state_space directory indicates that the port has been bound and is receiving traffic.
 When the driver detects that the agent has successfully created the port, i.e. VPP has dropped a vhost-user socket where it can be found by QEMU, it sends a notification to nova compute to start the VM. 
 
-Pro-tip: Using etcdctl watch --recursive --forever / to see the two ends fiddling with the data, which is (a) cool and (b) really useful for debugging
+Pro-tip: Use etcdctl watch --recursive --forever / to see the two ends fiddling with the data, which is (a) cool and (b) really useful for debugging
 
 
 # Networking-vpp agent
@@ -90,9 +92,9 @@ The following neutron features are supported in the 16.09 release of the network
 
   2)	Flat networking
 
-  3)	Neutron DHCP service
+  3)	Neutron DHCP service (q-dhcp)
 
-  4)	Neutron L3 routers
+  4)	Neutron L3 routers (q-router)
 
   5)	External network connectivity and floating IPs
 
