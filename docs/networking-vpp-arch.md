@@ -46,21 +46,24 @@ When an instance is spawned by nova-compute, it calls neutron to bind the port. 
 
 The class VPPMechanismDriver implements the ML2 plugin framework methods for handling neutron port level operations such as bindings, updates and deletes. When a neutron port is updated, if the networking-vpp driver is responsible for binding the port, it tells the VPP agent running on the hypervisor that it has work to do i.e. to program the VPP data plane. Due to the distributed nature of the system, the driver first logs this requirement to a journal (ML2 pre-commit phase) and then it notifies a thread to read the journal entries and create a port key in etcd (ML2 post-commit phase). This port key is created in a directory setup for storing the port information for the node. The layout for storing port information in etcd is as follows:
 
-LEADIN/nodes – subdirs are compute nodes
+  LEADIN/nodes – subdirs are compute nodes
 
-LEADIN/nodes/X/ports  (port-space), where X=compute-node-name. The entries are JSON strings containing all information on each bound port on the compute node. The deletion of an entry in this directory refers to an unbind action.
+  LEADIN/nodes/X/ports  (port-space), 
+  where X=compute-node-name. The entries are JSON strings containing all information on each 
+  bound port on the compute node. The deletion of an entry in this directory refers to an 
+  unbind action.
 
 The VPP agent running on the node watches the corresponding node directory within etcd recursively for work to do. When it receives a notification, it performs the action by programming the VPP data plane and writes the return state of the port into etcd. 
 
 The ML2 driver has a thread that polls for the return state of the port created in VPP. The return state information is stored in etcd using the below directory structure.
 
-LEADIN/state/nodes/X, where X=compute node name
+   LEADIN/state/nodes/X, where X=compute node name
 
-LEADIN/state/nodes/X/alive  - heartbeat back
+   LEADIN/state/nodes/X/alive  - heartbeat back
 
-LEADIN/state/nodes/X/ports (state_space) - return port state
+   LEADIN/state/nodes/X/ports (state_space) - return port state
 
-LEADIN/state/nodes/X/physnets – physnets present on the hypervisor
+   LEADIN/state/nodes/X/physnets – physnets present on the hypervisor
 
 A key in the state_space directory indicates that the port has been bound and is receiving traffic.
 When the driver detects that the agent has successfully created the port, i.e. VPP has dropped a vhost-user socket where it can be found by QEMU, it sends a notification to nova compute to start the VM. 
@@ -69,7 +72,9 @@ When the driver detects that the agent has successfully created the port, i.e. V
 # Networking-vpp agent
 The VPP agent runs on the compute nodes and programs the VPP control plane as per the neutron networking model determined by the ML2 agent. It uses the vpp_papi python package, which comes bundled with the VPP platform code to communicate with VPP.  When the agent is restarted, it resets VPP to a clean state, fetches any existing port data from etcd, and programs the VPP state. Then it watches the etcd port-space for ports to be bound and unbound.  When the agent receives a port_bind or port_unbind event from etcd, it performs the required action on VPP and updates the etcd state space.  The agent also writes the physical networks that are present on the hypervisor to etcd.
 
+
 # 16.09 release features:
+
 The following neutron features are supported in the 16.09 release of the networking-vpp driver.
 1)	Vlan networking
 2)	Flat networking
@@ -80,6 +85,7 @@ The following neutron features are supported in the 16.09 release of the network
 7)  Etcd based driver-agent communication
 8)  State recovery upon driver and agent restart
 
+
 # Devstack Settings:
 
 Use the devstack mitaka release with the below settings to stack the networking-vpp driver.
@@ -87,36 +93,34 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
 
 Enable appropriate services
 
-disable_service n-net
+  disable_service n-net
 
-enable_service q-svc
+  enable_service q-svc
 
-disable_service q-agt # we're not using OVS or LB
+  disable_service q-agt # we're not using OVS or LB
 
-enable_service q-dhcp
+  enable_service q-dhcp
 
-enable_service q-l3
+  enable_service q-l3
 
-enable_service q-meta
+  enable_service q-meta
 
+  enable_plugin networking-vpp  < URL of the networking-vpp repo >
 
+  Q_PLUGIN=ml2
 
-enable_plugin networking-vpp  < URL of the networking-vpp repo >
+  Q_ML2_PLUGIN_MECHANISM_DRIVERS=vpp
 
-Q_PLUGIN=ml2
+  Q_ML2_PLUGIN_TYPE_DRIVERS=vlan,flat
 
-Q_ML2_PLUGIN_MECHANISM_DRIVERS=vpp
+  Q_ML2_TENANT_NETWORK_TYPE=vlan,flat
 
-Q_ML2_PLUGIN_TYPE_DRIVERS=vlan,flat
+  ML2_VLAN_RANGES=physnet1: 100:200
 
-Q_ML2_TENANT_NETWORK_TYPE=vlan,flat
+  MECH_VPP_PHYSNETLIST=physnet1:TenGigabitEthernetb/0/0
 
-ML2_VLAN_RANGES=physnet1: 100:200
+  ETCD_HOST=${ETCD_HOST}
 
-MECH_VPP_PHYSNETLIST=physnet1:TenGigabitEthernetb/0/0
-
-ETCD_HOST=${ETCD_HOST}
-
-ETCD_PORT=${ETCD_PORT}
+  ETCD_PORT=${ETCD_PORT}
 
 
