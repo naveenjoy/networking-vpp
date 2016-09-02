@@ -39,7 +39,7 @@ Prerequisites for vhost-user:
 
 3)	Install QEMU emulator patches with vhost-user support if necessary.  We have tested this driver on Ubuntu 16.04 LTS, which ships with the QEMU emulator version 2.5.0 that has the required vhost-user support. 
 
-4)	Enable QEMU guest memory allocation with hugepages by setting the hw:mem_page_size extra specification in the flavor. To allocate 2048MB hugepages for guests on flavor m1.small use:
+4)	Enable QEMU guest memory allocation with hugepages by setting the hw:mem_page_size extra specification in the flavor. To allocate 2048MB hugepage size for guests on flavor m1.small use:
 
      nova flavor-key m1.small set hw:mem_page_size=2048 
 
