@@ -5,8 +5,11 @@ The VPP platform, provided by the FD.io project (FD.io/VPP) is a production qual
 # Design principles
 
 The networking-vpp ML2 driver software design follows the basic OpenStack cloud software design tenets. The main design goals being scalability, simplicity and availability. The key design principles are:
+
 1) All communications within the system are performed asynchronously. 
+
 2) The software components are designed to be horizontally scalable and the state information is maintained in a highly scalable and available distributed key value store (etcd). 
+
 3) All modules are unit and system tested to validate proper functionality. 
 
 # Major components
@@ -14,8 +17,11 @@ The networking-vpp ML2 driver software design follows the basic OpenStack cloud 
 The software architecture of the ML2 driver consists of the following main components:
 
 1) The networking-vpp ML2 driver, which implements the neutron ML2 mechanism driver APIs.
+
 2) The VPP agent, which runs on each hypervisor and programs the VPP data plane.
+
 3) An etcd distributed key-value store for storing agent state and for communication between the driver and agent. 
+
 4) The VPP switch platform, a high performance packet-processing stack running on each hypervisor in the userspace. 
   	
 # The vhost-user VIF type
@@ -32,7 +38,7 @@ intel_iommu=pt default_hugepagesz=2M hugepagesz=2M hugepages=2048
 
 3)	Install QEMU emulator patches with vhost-user support if necessary.  We have tested this driver on Ubuntu 16.04 LTS, which ships with the QEMU emulator version 2.5.0 that has the required vhost-user support. 
 
-4)	Enable QEMU guest memory allocation with hugepages by setting the hw:mem_page_size extra specification in the flavor. To allocate 2048 byte hugepages for guests on flavor m1.small use:
+4)	Enable QEMU guest memory allocation with hugepages by setting the hw:mem_page_size extra specification in the flavor. To allocate 2048MB hugepages for guests on flavor m1.small use:
 
      nova flavor-key m1.small set hw:mem_page_size=2048 
 
@@ -44,8 +50,9 @@ When an instance is spawned by nova-compute, it calls neutron to bind the port. 
 
 # Networking-vpp driver
 
-The class VPPMechanismDriver implements the ML2 plugin framework methods for handling neutron port level operations such as bindings, updates and deletes. When a neutron port is updated, if the networking-vpp driver is responsible for binding the port, it tells the VPP agent running on the hypervisor that it has work to do i.e. to program the VPP data plane. Due to the distributed nature of the system, the driver first logs this requirement to a journal (ML2 pre-commit phase) and then it notifies a thread to read the journal entries and create a port key in etcd (ML2 post-commit phase). This port key is created in a directory setup for storing the port information for the node. The layout for storing port information in etcd is as follows:
-
+The class VPPMechanismDriver implements the ML2 plugin framework methods for handling neutron port level operations such as bindings, updates and deletes. When a neutron port is updated, if the networking-vpp driver is responsible for binding the port, it tells the VPP agent running on the hypervisor that it has work to do i.e. to program the VPP data plane. Due to the distributed nature of the system, the driver first logs this requirement to a journal (ML2 pre-commit phase) and then it notifies a background thread to read the journal entries and create a port key in etcd. This port key is created in a directory setup for storing the port information for the node. The layout for storing port information in etcd is as follows:
+  LEADIN=/networking-vpp
+  
   LEADIN/nodes – subdirs are compute nodes
 
   LEADIN/nodes/X/ports  (port-space), 
@@ -67,6 +74,8 @@ The ML2 driver has a thread that polls for the return state of the port created 
 
 A key in the state_space directory indicates that the port has been bound and is receiving traffic.
 When the driver detects that the agent has successfully created the port, i.e. VPP has dropped a vhost-user socket where it can be found by QEMU, it sends a notification to nova compute to start the VM. 
+
+Pro-tip: Using etcdctl watch --recursive --forever / to see the two ends fiddling with the data, which is (a) cool and (b) really useful for debugging
 
 
 # Networking-vpp agent
