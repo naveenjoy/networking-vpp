@@ -76,14 +76,22 @@ The VPP agent runs on the compute nodes and programs the VPP control plane as pe
 # 16.09 release features:
 
 The following neutron features are supported in the 16.09 release of the networking-vpp driver.
-1)	Vlan networking
-2)	Flat networking
-3)	Neutron DHCP service
-4)	Neutron L3 routers
-5)	External network connectivity and floating IPs
-6)  DB journalling
-7)  Etcd based driver-agent communication
-8)  State recovery upon driver and agent restart
+
+  1)	Vlan networking
+
+  2)	Flat networking
+
+  3)	Neutron DHCP service
+
+  4)	Neutron L3 routers
+
+  5)	External network connectivity and floating IPs
+
+  6)    DB journalling
+
+  7)    Etcd based driver-agent communication
+
+  8)    State recovery upon driver and agent restart
 
 
 # Devstack Settings:
