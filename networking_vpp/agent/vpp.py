@@ -41,8 +41,10 @@ def _vpp_cb(*args, **kwargs):
 
 # Sometimes a callback fires unexpectedly.  We need to catch them
 # because vpp_papi will traceback otherwise
-vpp_papi.register_event_callback(_vpp_cb)
-
+try:
+    vpp_papi.register_event_callback(_vpp_cb)
+except TypeError:
+    pass
 
 class VPPInterface(object):
     def __init__(self, log):
