@@ -17,7 +17,10 @@
 import grp
 import os
 import pwd
-import vpp_papi
+try:
+    import vpp_papi
+except TypeError:
+    pass
 
 L2_VTR_POP_1=3
 
@@ -43,8 +46,8 @@ vpp_papi.register_event_callback(_vpp_cb)
 
 class VPPInterface(object):
     def __init__(self, log):
-        self.LOG = log
         try:
+            self.LOG = log
             self.r = vpp_papi.connect("test_papi")
         except TypeError: #vpp_papi logging module raises this error while connecting
             pass

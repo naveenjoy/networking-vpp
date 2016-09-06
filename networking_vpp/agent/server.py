@@ -646,8 +646,6 @@ def main():
                             )
         ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
         ops.process_ops()
-    except TypeError:
-        pass
     except Exception as e:
         LOG.debug("Agent received exception: %s" % str(e))
 
