@@ -44,7 +44,10 @@ vpp_papi.register_event_callback(_vpp_cb)
 class VPPInterface(object):
     def __init__(self, log):
         self.LOG = log
-        self.r = vpp_papi.connect("test_papi")
+        try:
+            self.r = vpp_papi.connect("test_papi")
+        except TypeError: #vpp_papi logging module raises this error while connecting
+            pass
 
     def _check_retval(self, t):
         """See if VPP returned OK.
@@ -52,7 +55,6 @@ class VPPInterface(object):
         VPP is very inconsistent in return codes, so for now this reports
         a logged warning rather than flagging an error.
         """
-
         try:
             self.LOG.debug("checking return value for object: %s" % str(t))
             if t.retval != 0:
@@ -60,8 +62,6 @@ class VPPInterface(object):
         except AttributeError as e:
             self.LOG.debug("Unexpected request format.  Error: %s on %s"
                            % (e, t))
-        except TypeError:
-            pass
 
     def get_interfaces(self):
         t = vpp_papi.sw_interface_dump(0, b'ignored')
@@ -129,11 +129,8 @@ class VPPInterface(object):
 
     def delete_vhostuser(self, idx):
         self.LOG.debug("Deleting VPP interface - index: %s" % idx)
-        try:
-            t = vpp_papi.delete_vhost_user_if(idx)
-            self._check_retval(t)
-        except TypeError:
-            pass
+        t = vpp_papi.delete_vhost_user_if(idx)
+        self._check_retval(t)
 
     def disconnect(self):
         vpp_papi.disconnect()
