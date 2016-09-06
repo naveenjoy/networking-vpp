@@ -32,6 +32,8 @@ from neutron import manager
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron_lib import constants as nl_const
+from urllib3.exceptions import ReadTimeoutError
+from urllib3 import Timeout
 
 eventlet.monkey_patch()
 
@@ -465,7 +467,9 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                 rv = self.etcd.watch(LEADIN + "/state", 
                                      recursive=True,
                                      index=tick, 
-                                     # timeout=TIMEOUT
+                                     timeout=Timeout(
+                                                    connect=None,
+                                                    read=None))
                                      )
                 LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
                 tick = rv.modifiedIndex+1
@@ -501,6 +505,10 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
             except etcd.EtcdWatchTimedOut:
                 # this is normal
                 pass
+            except etcd.EtcdException as e:
+                LOG.debug('Received an etcd exception: %s' % type(e))
+            except ReadTimeoutError:
+                LOG.debug('Etcd read timed out')
             except Exception, e:
                 LOG.warning('etcd threw exception %s' % traceback.format_exc(e))
                 time.sleep(2)
