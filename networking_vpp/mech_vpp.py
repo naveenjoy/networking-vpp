@@ -464,12 +464,14 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                 self._update_physnets()
                 LOG.debug("Known physical networks: %s" % self.physical_networks)
                 LOG.debug("ML2_VPP(%s): return thread pausing" % self.__class__.__name__)
-                rv = self.etcd.watch(LEADIN + "/state", 
+                rv = self.etcd.read(LEADIN + "/state", 
                                      recursive=True,
-                                     index=tick, 
+                                     waitIndex=tick,
+                                     wait=True 
                                      timeout=Timeout(
                                                     connect=None,
-                                                    read=None))
+                                                    read=None)
+                                     )
                 LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
                 tick = rv.modifiedIndex+1
                 # Matches a port key, gets host and uuid
