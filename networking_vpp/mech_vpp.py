@@ -470,7 +470,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
                                      wait=True, 
                                      timeout=Timeout(
                                                     connect=None,
-                                                    read=None))
+                                                    read=None)
+                                     )
                 LOG.debug("ML2_VPP(%s): return thread active" % self.__class__.__name__)
                 tick = rv.modifiedIndex+1
                 # Matches a port key, gets host and uuid
