@@ -1,6 +1,6 @@
 # Introduction
 
-The VPP platform, provided by the FD.io project (FD.io/VPP) is a production quality, high performing virtual switch that runs on commodity hardware. The networking-vpp ML2 mechanism driver enables high performance L2 networking within OpenStack by binding neutron ports with the VPP virtual forwarder. This driver currently supports VLAN and Flat networking ml2 type drivers and performs port binding for virtual interfaces (VIFs) of type vhost-user and tap.
+The VPP platform, provided by the FD.io project (https://FD.io) is a production quality, high performing virtual switch that runs on commodity hardware. The networking-vpp ML2 mechanism driver enables high performance L2 networking within OpenStack by binding neutron ports with the VPP virtual forwarder. This driver currently supports VLAN and Flat networking ml2 type drivers and performs port binding for virtual interfaces (VIFs) of type vhost-user and tap.
 
 # Design principles
 
