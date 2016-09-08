@@ -301,6 +301,12 @@ class AgentCommunicator(object):
             LOG.warning('ML2_VPP: recursion check hit on activating port')
         else:
             self.recursive = True
+            LOG.debug("ML2_VPP: Calling plugin to update port:%(port)s status "
+                      "on host: %(host)s",
+                      {
+                          'port': port_id,
+                          'host': host,
+                      })
             plugin.update_port_status(context, port_id,
                                       n_const.PORT_STATUS_ACTIVE,
                                       host=host)
