@@ -22,7 +22,7 @@ The software architecture of the ML2 driver consists of the following main compo
 
 3) An etcd (version >= 3.0.x) cluster for storing agent state and communication between the driver and agent. The etcd cluster members run on the controller node(s). For etcd authentication (optional), an username and password could be used at the driver and agent.
 
-       Note: The communication between the ML2 driver and VPP agent uses the native REST based        interface of etcd and does not use the RabbitMQ messaging used by OpenStack services
+       Note: The communication between the ML2 driver and VPP agent uses the native REST based interface of etcd and does not use the RabbitMQ messaging used by OpenStack services
 
 4) The VPP switch platform, a high performance packet-processing stack, running on each compute node in the userspace. 
   	
