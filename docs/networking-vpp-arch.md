@@ -22,7 +22,7 @@ The software architecture of the ML2 driver consists of the following main compo
 
 3) An etcd (version >= 3.0.x) cluster for storing agent state and communication between the driver and agent. The etcd cluster members run on the controller node(s). For etcd authentication (optional), an username and password could be used at the driver and agent.
 
-   Note: The communication between the ML2 driver and VPP agent uses the native REST based        interface of etcd and does not use the RabbitMQ messaging used by OpenStack services
+       Note: The communication between the ML2 driver and VPP agent uses the native REST based        interface of etcd and does not use the RabbitMQ messaging used by OpenStack services
 
 4) The VPP switch platform, a high performance packet-processing stack, running on each compute node in the userspace. 
   	
@@ -97,7 +97,7 @@ The ML2 driver runs a thread that polls etcd for the return state of the port cr
 A key in the state_space directory indicates that the port has been bound and is receiving traffic.
 When the driver detects that the agent has successfully created the port, i.e. VPP has dropped a vhost-user socket where it can be found by QEMU, it sends a notification to nova compute to start the VM. 
 
-    Pro-tip: Use etcdctl watch --recursive --forever / to see the two ends fiddling with the data,       which is (a) cool and (b) really useful for debugging
+    Pro-tip: Use etcdctl watch --recursive --forever / to see the two ends fiddling with the data,   which is (a) cool and (b) really useful for debugging
 
 Sample JSON node entries in etcd port-space for a vhostuser port type created on a compute node named "server-2"
 
