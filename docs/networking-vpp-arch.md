@@ -213,7 +213,7 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
     ETCD_PORT=${ETCD_PORT}
     
     
-  # VPP startup.conf
+# VPP startup.conf
   
   VPP installs a startup config file in the /etc/vpp directory named startup.conf. For example, the below sample configuration starts up VPP with the following settings: 
   
