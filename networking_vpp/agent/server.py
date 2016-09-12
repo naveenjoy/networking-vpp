@@ -121,7 +121,8 @@ class VPPForwarder(object):
         the physnet mapping """
         intf = self.physnets.get(phys_net, None)
         if intf:
-            LOG.debug("Using trunk interface:%s for VLAN networking" % intf)
+            LOG.debug("Using trunk interface:%s "
+                      "for physical network:%s" % (intf,phys_net))
         else:
             LOG.error("Could not find a VLAN trunk interface" 
                       " for physical network:%s" % phys_net)
