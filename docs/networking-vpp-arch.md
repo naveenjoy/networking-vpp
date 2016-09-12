@@ -225,11 +225,9 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
   
   d) unix { full-coredump } - Asks the Linux kernel to dump all memory-mapped address regions
   
-  e) api-trace { on } - Enables API trace capture from the beginning of time, and arrange for a post-mortem dump of the API trace if the application terminates abnormally
+  e) api-trace { on } - Enables API trace capture from the beginning of time, and arranges for a post-mortem dump of the API trace if the application terminates abnormally
   
-  f) dpdk { dev 0000:03:00.0 } - Asks VPP to white-list [or drive] a specific PCI device at 0000:03:00.0  
-  PCI-dev is a string of the form [domain:]bus:devid.func.
-  This is the same format used in the linux sysfs tree (i.e. /sys/bus/pci/devices) for PCI device directory names.
+  f) dpdk { dev 0000:03:00.0 } - Asks VPP to white-list [or drive] a specific PCI device at 0000:03:00.0. The PCI-dev is a string of the form [domain:]bus:devid.func. This is the same format used in the linux sysfs tree (i.e. /sys/bus/pci/devices) for PCI device directory names.
   
   g) dpdk {socket-mem 512,512} - Allocates 512MB of memory from hugepages on CPU sockets 
   
