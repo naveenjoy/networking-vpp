@@ -221,19 +221,19 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
   
   b)  unix { log /tmp/vpp.log } - Logs the startup configuration and all subsequent CLI commands in /tmp/vpp.log
   
-  c) unix { cli-listen localhost:5002 } - Bind the CLI to listen at address localhost on TCP port 5002
+  c) unix { cli-listen localhost:5002 } - Binds the CLI to listen at address localhost on TCP port 5002
   
-  d) unix { full-coredump } - Ask the Linux kernel to dump all memory-mapped address regions, instead of just text+data+bss
+  d) unix { full-coredump } - Asks the Linux kernel to dump all memory-mapped address regions
   
-  e) api-trace { on } - Enable API trace capture from the beginning of time, and arrange for a post-mortem dump of the API trace if the application terminates abnormally
+  e) api-trace { on } - Enables API trace capture from the beginning of time, and arrange for a post-mortem dump of the API trace if the application terminates abnormally
   
-  f) dpdk { dev 0000:03:00.0 } - Ask VPP to white-list [or drive] a specific PCI device at 0000:03:00.0  
+  f) dpdk { dev 0000:03:00.0 } - Asks VPP to white-list [or drive] a specific PCI device at 0000:03:00.0  
   PCI-dev is a string of the form [domain:]bus:devid.func.
   This is the same format used in the linux sysfs tree (i.e. /sys/bus/pci/devices) for PCI device directory names.
   
-  g) dpdk {socket-mem 512,512} - Allocate 512MB of memory from hugepages on CPU sockets 
+  g) dpdk {socket-mem 512,512} - Allocates 512MB of memory from hugepages on CPU sockets 
   
-  h) cpu { workers 2 } - Allocate 2 CPU cores to VPP
+  h) cpu { workers 2 } - Allocates 2 CPU cores to VPP
   
      unix {
          nodaemon
