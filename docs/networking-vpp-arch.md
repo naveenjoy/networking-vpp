@@ -36,9 +36,9 @@ Prerequisites for vhost-user:
 
         intel_iommu=pt default_hugepagesz=2M hugepagesz=2M hugepages=2048
 
-2)	Build and install the VPP Platform and its python API bindings
-
-        Refer to: http://wiki.fd.io/view/VPP (Building and Installing a VPP Package)
+2)	Build and install the VPP Platform and its python API bindings  
+    Refer to: http://wiki.fd.io/view/VPP (Building and Installing a VPP Package)
+    
 
 3)	Install QEMU emulator patches with vhost-user support if necessary.  We have tested this driver on Ubuntu 16.04 LTS, which ships with the QEMU emulator version 2.5.0 that has the required vhost-user support. 
 
@@ -178,7 +178,7 @@ The following neutron features are supported in the 16.09 release of the network
 # Devstack Settings
 
 Use the devstack mitaka release with the below settings to stack the networking-vpp driver.
-The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd cluster member. The ETCD_PORT is the etcd client port.
+The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd cluster member. The ETCD_PORT is the etcd client port. If etcd security has been activated, you can optionally provide the username and password using the settings ETCD_USER and ETCD_PASSWORD.
 
     Enable appropriate services
 
@@ -211,6 +211,10 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
     ETCD_HOST=${ETCD_HOST}
 
     ETCD_PORT=${ETCD_PORT}
+    
+    ETCD_USER=${ETCD_USERNAME}
+    
+    ETCD_PASSWORD=${ETCD_PASSWORD}
     
     
 # VPP startup.conf
