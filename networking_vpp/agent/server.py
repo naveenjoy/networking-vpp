@@ -643,6 +643,8 @@ def main():
         etcd_client = etcd.Client(
                             host=cfg.CONF.ml2_vpp.etcd_host,
                             port=cfg.CONF.ml2_vpp.etcd_port,
+                            username=cfg.CONF.ml2_vpp.etcd_user,
+                            password=cfg.CONF.ml2_vpp.etcd_pass,
                             allow_reconnect=True
                             )
         ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)

@@ -410,6 +410,8 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
         self.etcd = etcd.Client(
                         host=cfg.CONF.ml2_vpp.etcd_host,
                         port=cfg.CONF.ml2_vpp.etcd_port,
+                        username=cfg.CONF.ml2_vpp.etcd_user,
+                        password=cfg.CONF.ml2_vpp.etcd_pass,
                         allow_reconnect=True
                              )  
         # We need certain directories to exist

@@ -33,6 +33,8 @@ function init_vpp {
 function configure_vpp {
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_host $ETCD_HOST
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_port $ETCD_PORT
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_user $ETCD_USER
+    iniset /$Q_PLUGIN_CONF_FILE ml2_vpp etcd_pass $ETCD_PASSWORD
     iniset /$Q_PLUGIN_CONF_FILE ml2_vpp physnets $MECH_VPP_PHYSNETLIST
 
     if [ ! -z "$MECH_VPP_PHYSNETLIST" ] ; then
