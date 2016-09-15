@@ -193,6 +193,7 @@ class VPPForwarder(object):
                     if_upstream = self.get_vpp_ifidx('%s.%s' % (intf, seg_id))
                     app.logger.debug('Adding upstream trunk interface:%s.%s \
                         to bridge for vlan networking' % (intf, seg_id))
+                self.vpp.set_vlan_tag_rewrite(if_upstream)
             else:
                 raise Exception('network type %s not supported', net_type)
             self.vpp.ifup(if_upstream)
