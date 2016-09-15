@@ -587,6 +587,7 @@ class EtcdListener(object):
                 LOG.debug('Agent received an etcd error: %s' % str(e))
             except Exception as e:
                 LOG.debug('Agent received exception of type %s' % type(e))
+                traceback.print_exc()
                 time.sleep(1) # TODO(ijw): prevents tight crash loop, but adds latency
                 # Should be specific to etcd faults, should have sensible behaviour
                 # Don't just kill the thread...
