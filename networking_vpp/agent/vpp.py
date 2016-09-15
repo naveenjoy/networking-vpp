@@ -17,10 +17,7 @@
 import grp
 import os
 import pwd
-try:
-    import vpp_papi
-except TypeError:
-    pass
+import vpp_papi
 
 L2_VTR_POP_1=3
 
