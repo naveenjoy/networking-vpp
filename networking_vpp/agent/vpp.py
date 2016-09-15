@@ -19,6 +19,8 @@ import os
 import pwd
 import vpp_papi
 
+L2_VTR_POP_1=3
+
 
 def mac_to_bytes(mac):
     return str(''.join(chr(int(x, base=16)) for x in mac.split(':')))
@@ -159,13 +161,27 @@ class VPPInterface(object):
         self.LOG.debug("Creating vlan subinterface with ID:%s and vlan_tag:%s"
                        % (if_id, vlan_tag))
         t = vpp_papi.create_vlan_subif(
-            if_id,
-            vlan_tag)
+                                       if_id,
+                                       vlan_tag
+                                       )
         self.LOG.debug("Create vlan subinterface response: %s" % str(t))
-
         self._check_retval(t)
-
+        #Patch contributed by Sean Chandler 
+        # turn on VLAN tag pop for this subinterface (L2_VTR_POP_1=3)
+        self.set_vlan_tag_rewrite(t.sw_if_index)
         return t.sw_if_index
+
+    #Patch contributed by Sean Chandler
+    def set_vlan_tag_rewrite(self, if_id, vtr_op=L2_VTR_POP_1, push_dot1q=0, tag1=0, tag2=0):
+        t = vpp_papi.l2_interface_vlan_tag_rewrite(
+                if_id,
+                vtr_op,
+                push_dot1q,
+                tag1,
+                tag2
+                )
+        self.LOG.debug("Set subinterface vlan tag pop response: %s" % str(t))
+        self._check_retval(t)
 
 #    def create_srcrep_vxlan_subif(self, vrf_id, src_addr, bcast_addr, vnid):
 #        t = vpp_papi.vxlan_add_del_tunnel(
