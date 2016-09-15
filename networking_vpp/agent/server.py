@@ -651,7 +651,7 @@ def main():
         ops.process_ops()
     except Exception as e:
         LOG.debug("Agent received exception: %s" % str(e))
-        traceback.print_stack()
+        traceback.print_exc()
 
 
 if __name__ == '__main__':
