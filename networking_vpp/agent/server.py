@@ -636,9 +636,12 @@ def main():
                             vxlan_vrf=cfg.CONF.ml2_vpp.vxlan_vrf,
                             qemu_user=qemu_user,
                             qemu_group=qemu_group)
-        LOG.debug("setting etcd client to host:%s port:%s" % 
+        LOG.debug("Using etcd host:%s port:%s user:%s password:%s" % 
                            (cfg.CONF.ml2_vpp.etcd_host,
-                            cfg.CONF.ml2_vpp.etcd_port,)
+                            cfg.CONF.ml2_vpp.etcd_port,
+                            cfg.CONF.ml2_vpp.etcd_user,
+                            cfg.CONF.ml2_vpp.etcd_pass,
+                            )
                            )
         etcd_client = etcd.Client(
                             host=cfg.CONF.ml2_vpp.etcd_host,

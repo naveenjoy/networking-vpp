@@ -406,12 +406,15 @@ class EtcdAgentCommunicator(ThreadedAgentCommunicator):
         self.physical_networks = set()
         etcd_host = cfg.CONF.ml2_vpp.etcd_host
         etcd_port = cfg.CONF.ml2_vpp.etcd_port
-        LOG.debug("etcd client - host:%s port:%s" % (etcd_host, etcd_port))
+        etcd_user = cfg.CONF.ml2_vpp.etcd_user
+        etcd_pass = cfg.CONF.ml2_vpp.etcd_pass
+        LOG.debug("Using etcd - host:%s, port:%s, user:%s, pass:%s" % 
+                        (etcd_host, etcd_port, etcd_user, etcd_pass))
         self.etcd = etcd.Client(
-                        host=cfg.CONF.ml2_vpp.etcd_host,
-                        port=cfg.CONF.ml2_vpp.etcd_port,
-                        username=cfg.CONF.ml2_vpp.etcd_user,
-                        password=cfg.CONF.ml2_vpp.etcd_pass,
+                        host=etcd_host,
+                        port=etcd_port,
+                        username=etcd_user,
+                        password=etcd_pass,
                         allow_reconnect=True
                              )  
         # We need certain directories to exist
