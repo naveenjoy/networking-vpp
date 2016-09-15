@@ -254,4 +254,24 @@ The ETCD_HOST is the IP address (i.e. the advertise-client-url IP) of the etcd c
        workers 2
          }
 
+# Installing VPP 
+
+   Create a directory for cloning the VPP repo. Here we will use $HOME/src.  
+   Follow the below steps to install VPP debian packages and its python API.
+   
+     cd $HOME/src
+     git clone -b master https://gerrit.fd.io/r/vpp
+     cd vpp
+     sudo make wipe
+     sudo make wipe-release
+     sudo make install-dep
+     sudo make bootstrap
+     sudo make build-release
+     sudo make build
+     cd vpp-api/python/
+     sudo python setup.py install
+     cd $HOME/src/vpp
+     make pkg-deb
+     cd build-root
+     dpkg -i *.deb
 
