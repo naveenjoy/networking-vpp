@@ -26,6 +26,7 @@ import six
 import time
 import traceback
 
+from networking_vpp import config_opts
 from networking_vpp.db import db
 from neutron.common import constants as n_const
 from neutron import context as n_context
@@ -35,18 +36,12 @@ from neutron import manager
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron_lib import constants as nl_const
+from urllib3 import Timeout
 
 eventlet.monkey_patch()
 
 LOG = logging.getLogger(__name__)
-
-vpp_opts = [
-    cfg.StrOpt('agents',
-               help=_("Name=HTTP URL mapping list of agents on compute "
-                      "nodes.")),
-]
-
-cfg.CONF.register_opts(vpp_opts, "ml2_vpp")
+assert config_opts
 
 
 class VPPMechanismDriver(api.MechanismDriver):
@@ -368,8 +363,16 @@ class EtcdAgentCommunicator(AgentCommunicator):
 
     def __init__(self):
         super(EtcdAgentCommunicator, self).__init__()
+        etcd_host = cfg.CONF.ml2_vpp.etcd_host
+        etcd_port = cfg.CONF.ml2_vpp.etcd_port
+        etcd_username = cfg.CONF.ml2_vpp.etcd_user
+        etcd_password = cfg.CONF.ml2_vpp.etcd_pass
 
-        self.etcd_client = etcd.Client()  # TODO(ijw): give this args
+        self.etcd_client = etcd.Client(host=etcd_host,
+                                       port=etcd_port,
+                                       username=etcd_username,
+                                       password=etcd_password,
+                                       allow_reconnect=True)
 
         # We need certain directories to exist
         self.do_etcd_mkdir(LEADIN + '/state')
@@ -538,8 +541,11 @@ class EtcdAgentCommunicator(AgentCommunicator):
             try:
                 LOG.debug("ML2_VPP(%s): return worker pausing"
                           % self.__class__.__name__)
-                rv = self.etcd_client.watch(LEADIN + "/state", recursive=True,
-                                            index=tick)
+                rv = self.etcd_client.watch(LEADIN + "/state",
+                                            recursive=True,
+                                            index=tick,
+                                            timeout=Timeout(connect=None,
+                                                            read=None))
                 LOG.debug("ML2_VPP(%s): return worker active"
                           % self.__class__.__name__)
                 tick = rv.modifiedIndex + 1

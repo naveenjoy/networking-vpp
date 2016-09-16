@@ -38,12 +38,16 @@ import time
 import traceback
 import vpp
 
+
 from networking_vpp import config_opts
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
+from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
+from urllib3.exceptions import ReadTimeoutError
+from urllib3 import Timeout
 
 LOG = logging.getLogger(__name__)
 
@@ -416,6 +420,8 @@ class EtcdListener(object):
         self.etcd_client = etcd_client
         self.vppf = vppf
         self.physnets = physnets
+        self.CONNECT = 15  # etcd connect timeout
+        self.HEARTBEAT = 20  # read timeout in seconds
 
         # We need certain directories to exist
         self.mkdir(LEADIN + '/state/%s/ports' % self.host)
@@ -446,7 +452,55 @@ class EtcdListener(object):
                                                 network_type,
                                                 segmentation_id)
 
-    HEARTBEAT = 60  # seconds
+    def _sync_state(self, port_key_space):
+        """Sync VPP port state with etcd and return correct watchIndex"""
+
+        LOG.debug('Syncing VPP port state..')
+        # TODO(najoy): Clean up existing (possibly) stale port states
+        rv = self.etcd_client.read(port_key_space, recursive=True)
+        for child in rv.children:
+            m = re.match(port_key_space + '/([^/]+)$', child.key)
+            if m:
+                port = m.group(1)
+                LOG.debug('Syncing vpp state by binding existing port:%s'
+                          % port)
+                data = json.loads(child.value)
+                props = self.bind(data['binding_type'],
+                                  port,
+                                  data['mac_address'],
+                                  data['physnet'],
+                                  data['network_type'],
+                                  data['segmentation_id']
+                                  )
+                if props:
+                    self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
+                                           % (self.host, port),
+                                           json.dumps(props))
+        return self._recover_etcd_state(port_key_space)
+
+    def _clear_state(self, key_space):
+        """Clear all the keys in the key_space directory"""
+
+        LOG.debug("Clearing key space: %s" % key_space)
+        try:
+            rv = self.etcd_client.read(key_space)
+            for child in rv.children:
+                self.etcd_client.delete(child.key)
+        except etcd.EtcdNotFile:
+            pass
+
+    def _recover_etcd_state(self, key_space):
+        """Recover etcd state.
+
+        Recover the current state of the etcd watch keyspace
+        if we miss all the 1000 events. This is done by
+        reading the key_space and re-starting the
+        watch from etcd_index + 1
+        """
+
+        LOG.debug("Recovering etcd key space: %s" % key_space)
+        rv = self.etcd_client.read(key_space)
+        return rv.etcd_index + 1
 
     def process_ops(self):
         # TODO(ijw): needs to remember its last tick on reboot, or
@@ -456,8 +510,12 @@ class EtcdListener(object):
         for f in physnets:
             self.etcd_client.write(LEADIN + '/state/%s/physnets/%s'
                                    % (self.host, f), 1)
-
-        tick = None
+        # Set the port keyspace to watch
+        port_key_space = LEADIN + "/nodes/%s/ports" % self.host
+        state_key_space = LEADIN + "/state/%s/ports" % self.host
+        self._clear_state(state_key_space)
+        tick = self._sync_state(port_key_space)
+        LOG.debug("Starting watch on ports key space from Index: %s" % tick)
         while True:
 
             # The key that indicates to people that we're alive
@@ -468,20 +526,20 @@ class EtcdListener(object):
             try:
                 LOG.error("ML2_VPP(%s): thread pausing"
                           % self.__class__.__name__)
-                rv = self.etcd_client.watch(LEADIN + "/nodes/%s/ports"
-                                            % self.host,
+                rv = self.etcd_client.watch(port_key_space,
                                             recursive=True,
                                             index=tick,
-                                            timeout=self.HEARTBEAT)
-                LOG.error('watch received %s on %s at tick %s',
-                          rv.action, rv.key, rv.modifiedIndex)
+                                            timeout=Timeout(connect=None,
+                                                            read=None))
+                LOG.debug("watch received %s on %s "
+                          "at tick %s" % (rv.action, rv.key,
+                                          rv.modifiedIndex))
                 tick = rv.modifiedIndex + 1
-                LOG.error("ML2_VPP(%s): thread active"
+                LOG.debug("ML2_VPP(%s): thread active"
                           % self.__class__.__name__)
 
                 # Matches a port key, gets host and uuid
-                m = re.match(LEADIN + '/nodes/%s/ports/([^/]+)$' % self.host,
-                             rv.key)
+                m = re.match(port_key_space + '/([^/]+)$', rv.key)
 
                 if m:
                     port = m.group(1)
@@ -491,8 +549,7 @@ class EtcdListener(object):
                         self.unbind(port)
                         try:
                             self.etcd_client.delete(
-                                LEADIN + '/state/%s/ports/%s'
-                                % (self.host, port))
+                                port_key_space + '/%s' % port)
                         except etcd.EtcdKeyNotFound:
                             # Gone is fine, if we didn't delete it
                             # it's no problem
@@ -500,22 +557,35 @@ class EtcdListener(object):
                     else:
                         # Create or update == bind
                         data = json.loads(rv.value)
-                        props = self.bind(port,
-                                          data['binding_type'],
+                        props = self.bind(data['binding_type'],
+                                          port,
                                           data['mac_address'],
                                           data['physnet'],
                                           data['network_type'],
                                           data['segmentation_id'])
-                        self.etcd_client.write(LEADIN + '/state/%s/ports/%s'
-                                               % (self.host, port),
-                                               json.dumps(props))
+                        if props:
+                            self.etcd_client.write(state_key_space + '/%s'
+                                                   % port,
+                                                   json.dumps(props))
 
                 else:
                     LOG.warn('Unexpected key change in etcd port feedback')
 
-            except etcd.EtcdWatchTimedOut:
+            except (etcd.EtcdWatchTimedOut, etcd.EtcdConnectionFailed):
                 # This is normal
                 pass
+            except etcd.EtcdEventIndexCleared:
+                LOG.debug("etcd event index cleared "
+                          "recovering the etcd watch index")
+                # Recover the watching space Index
+                tick = self._recover_etcd_state(port_key_space)
+                LOG.debug("Etcd watch index recovered at %s" % tick)
+            except etcd.EtcdException as e:
+                LOG.debug('Received an etcd exception: %s' % type(e))
+            except ReadTimeoutError:
+                LOG.debug('Etcd read timed out')
+            except etcd.EtcdError as e:
+                LOG.debug('Agent received an etcd error: %s' % str(e))
             except Exception as e:
                 LOG.error('etcd threw exception %s' % traceback.format_exc(e))
 
@@ -527,14 +597,31 @@ class EtcdListener(object):
                 # sensible behaviour - Don't just kill the thread...
 
 
+class VPPService(object):
+    """Provides capability to manage the VPP service"""
+    def __init__(self):
+        self.timeout = 10  # VPP connect timeout in seconds
+        LOG.debug("Agent is restarting VPP")
+        utils.execute(['service', 'vpp', 'restart'], run_as_root=True)
+
+    def wait(self):
+        time.sleep(self.timeout)  # TODO(najoy): check if vpp is actually up
+
+
 def main():
     cfg.CONF(sys.argv[1:])
-
+    logging.setup(cfg.CONF, 'VPPAgent')
+    LOG.debug('Restarting VPP..')
+    VPPService().wait()
     # If the user and/or group are specified in config file, we will use
     # them as configured; otherwise we try to use defaults depending on
     # distribution. Currently only supporting ubuntu and redhat.
     qemu_user = cfg.CONF.ml2_vpp.qemu_user
     qemu_group = cfg.CONF.ml2_vpp.qemu_group
+    etcd_host = cfg.CONF.ml2_vpp.etcd_host
+    etcd_port = cfg.CONF.ml2_vpp.etcd_port
+    etcd_username = cfg.CONF.ml2_vpp.etcd_user
+    etcd_password = cfg.CONF.ml2_vpp.etcd_pass
     default_user, default_group = get_qemu_default()
     if not qemu_user:
         qemu_user = default_user
@@ -544,9 +631,15 @@ def main():
     physnet_list = cfg.CONF.ml2_vpp.physnets.replace(' ', '').split(',')
     physnets = {}
     for f in physnet_list:
-        (k, v) = f.split(':')
-        physnets[k] = v
-
+        if f:
+            try:
+                (k, v) = f.split(':')
+                physnets[k] = v
+            except Exception:
+                LOG.error("Could not parse physnet to interface mapping "
+                          "check the format in the config file: "
+                          "physnets = physnet1:<interface1>, "
+                          "physnet2:<interface2>")
     vppf = VPPForwarder(physnets,
                         vxlan_src_addr=cfg.CONF.ml2_vpp.vxlan_src_addr,
                         vxlan_bcast_addr=cfg.CONF.ml2_vpp.vxlan_bcast_addr,
@@ -554,7 +647,12 @@ def main():
                         qemu_user=qemu_user,
                         qemu_group=qemu_group)
 
-    etcd_client = etcd.Client()  # TODO(ijw): args
+    etcd_client = etcd.Client(host=etcd_host,
+                              port=etcd_port,
+                              username=etcd_username,
+                              password=etcd_password,
+                              allow_reconnect=True
+                              )
 
     ops = EtcdListener(cfg.CONF.host, etcd_client, vppf, physnets)
 
