@@ -1,3 +1,4 @@
+
 # Copyright (c) 2017 Cisco Systems, Inc.
 # All Rights Reserved
 #
@@ -44,6 +45,7 @@ import vpp
 from networking_vpp._i18n import _
 from networking_vpp import compat
 from networking_vpp.compat import n_const
+from networking_vpp.compat import plugin_constants
 from networking_vpp import config_opts
 from networking_vpp import etcdutils
 from networking_vpp.mech_vpp import SecurityGroup
@@ -54,8 +56,13 @@ from networking_vpp import version
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.plugins.common import constants as p_const
-from neutron.plugins.ml2 import config
+try:
+    # TODO(ijw): TEMPORARY, better fix coming that reverses this
+    from neutron.plugins.ml2 import config
+    assert config
+except ImportError:
+    from neutron.conf.plugins.ml2 import config
+    config.register_ml2_plugin_opts()
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_reports import guru_meditation_report as gmr
@@ -73,11 +80,6 @@ VppAcl = namedtuple('VppAcl', ['in_idx', 'out_idx'])
 # When False, reverse rules are added by the vpp-agent and
 # VPP does not maintain any session states
 reflexive_acls = True
-
-# config_opts and config are required to configure the options within it, but
-# not referenced from here, so shut up tox:
-assert config_opts
-assert config
 
 # Apply monkey patch if necessary
 compat.monkey_patch()
@@ -730,15 +732,29 @@ class VPPForwarder(object):
         """
 
         bridge = bridge_lib.BridgeDevice(bridge_name)
+        bridge.set_log_fail_as_error(False)
         if bridge.exists() and ip_lib.device_exists(tap_name) \
            and not bridge.owns_interface(tap_name):
             try:
                 bridge.addif(tap_name)
-            except Exception:
-                LOG.exception("Can't add tap interface %s to bridge %s" %
-                              (tap_name, bridge_name))
+            except Exception as ex:
+                # External TAP interfaces created by DHCP or L3 agent will be
+                # added to corresponding Linux Bridge by vpp-agent to talk to
+                # VPP. During a regular port binding process, there are two
+                # code paths calling this function for adding the interface to
+                # the Linux Bridge, which may potentially cause a race
+                # condition and a non-harmful traceback in the log.
 
-    def _ensure_kernelside_plugtap(self, bridge_name, tap_name, int_tap_name):
+                # The fix will eliminate the non-harmful traceback in the log.
+                match = re.search(r"Stderr\: device (vpp|tap)[0-9a-f]{8}-"
+                                  "[0-9a-f]{2} is already a member of a "
+                                  "bridge; can't enslave it to bridge br-"
+                                  "[0-9a-f]{8}-[0-9a-f]{2}\.", ex.message)
+                if not match:
+                    LOG.exception("Can't add interface %s to bridge %s: %s" %
+                                  (tap_name, bridge_name, ex.message))
+
+    def _ensure_kernelside_tap(self, bridge_name, tap_name, int_tap_name):
         # This is the kernel-side config (and we should not assume
         # that, just because the interface exists in VPP, it has
         # been done previously - the crash could occur in the
@@ -776,9 +792,7 @@ class VPPForwarder(object):
             # Neutron's naming
             tap_name = get_tap_name(uuid)
 
-            if if_type == 'maketap':
-                props = {'name': tap_name}
-            elif if_type == 'plugtap':
+            if if_type == 'tap':
                 bridge_name = get_bridge_name(uuid)
                 int_tap_name = get_vpptap_name(uuid)
 
@@ -810,19 +824,17 @@ class VPPForwarder(object):
                 LOG.debug('binding port %s as type %s' %
                           (uuid, if_type))
 
-                if if_type == 'maketap':
-                    iface_idx = self.vpp.create_tap(tap_name, mac, tag)
-                elif if_type == 'plugtap':
+                if if_type == 'tap':
                     iface_idx = self.vpp.create_tap(int_tap_name, mac, tag)
                 elif if_type == 'vhostuser':
                     iface_idx = self.vpp.create_vhostuser(path, mac, tag)
 
-            if if_type == 'plugtap':
+            if if_type == 'tap':
                 # Plugtap interfaces belong in a kernel bridge, and we need
                 # to monitor for the other side attaching.
-                self._ensure_kernelside_plugtap(bridge_name,
-                                                tap_name,
-                                                int_tap_name)
+                self._ensure_kernelside_tap(bridge_name,
+                                            tap_name,
+                                            int_tap_name)
 
             props['iface_idx'] = iface_idx
             self.interfaces[uuid] = props
@@ -954,33 +966,33 @@ class VPPForwarder(object):
             # interface is notified as connected to qemu
             if iface_idx in self.iface_connected:
                 self.iface_connected.remove(iface_idx)
-        elif props['bind_type'] in ['maketap', 'plugtap']:
+        elif props['bind_type'] == 'tap':
             # remove port from bridge (sets to l3 mode) prior to deletion
             self.vpp.delete_from_bridge(iface_idx)
             self.vpp.delete_tap(iface_idx)
-            if props['bind_type'] == 'plugtap':
-                bridge_name = get_bridge_name(uuid)
 
-                class FailableBridgeDevice(bridge_lib.BridgeDevice):
-                    # For us, we expect failing commands and want them ignored.
-                    def _brctl(self, cmd):
-                        cmd = ['brctl'] + cmd
-                        ip_wrapper = ip_lib.IPWrapper(self.namespace)
-                        return ip_wrapper.netns.execute(
-                            cmd,
-                            check_exit_code=False,
-                            log_fail_as_error=False,
-                            run_as_root=True
-                        )
-                bridge = FailableBridgeDevice(bridge_name)
-                if bridge.exists():
-                    # These may fail, don't care much
-                    if bridge.owns_interface(props['int_tap_name']):
-                        bridge.delif(props['int_tap_name'])
-                    if bridge.owns_interface(props['ext_tap_name']):
-                        bridge.delif(props['ext_tap_name'])
-                    bridge.link.set_down()
-                    bridge.delbr()
+            bridge_name = get_bridge_name(uuid)
+
+            class FailableBridgeDevice(bridge_lib.BridgeDevice):
+                # For us, we expect failing commands and want them ignored.
+                def _brctl(self, cmd):
+                    cmd = ['brctl'] + cmd
+                    ip_wrapper = ip_lib.IPWrapper(self.namespace)
+                    return ip_wrapper.netns.execute(
+                        cmd,
+                        check_exit_code=False,
+                        log_fail_as_error=False,
+                        run_as_root=True
+                    )
+            bridge = FailableBridgeDevice(bridge_name)
+            if bridge.exists():
+                # These may fail, don't care much
+                if bridge.owns_interface(props['int_tap_name']):
+                    bridge.delif(props['int_tap_name'])
+                if bridge.owns_interface(props['ext_tap_name']):
+                    bridge.delif(props['ext_tap_name'])
+                bridge.link.set_down()
+                bridge.delbr()
         else:
             LOG.error('Unknown port type %s during unbind',
                       props['bind_type'])
@@ -1547,10 +1559,10 @@ class VPPForwarder(object):
         """
         if_name, if_idx = self.get_if_for_physnet(router['external_physnet'])
         # Set the external physnet/subif as a SNAT outside interface
-        if router['external_net_type'] == p_const.TYPE_VLAN:
+        if router['external_net_type'] == plugin_constants.TYPE_VLAN:
             if_idx = self._get_external_vlan_subif(
                 if_name, if_idx, router['external_segment'])
-        elif router['external_net_type'] == p_const.TYPE_FLAT:
+        elif router['external_net_type'] == plugin_constants.TYPE_FLAT:
             # Use the ifidx grabbed earlier
             pass
         else:
@@ -1589,10 +1601,10 @@ class VPPForwarder(object):
         SNAT external IP pool from this router's VRF.
         """
         if_name, if_idx = self.get_if_for_physnet(router['external_physnet'])
-        if router['external_net_type'] == p_const.TYPE_VLAN:
+        if router['external_net_type'] == plugin_constants.TYPE_VLAN:
             if_idx = self.vpp.get_vlan_subif(
                 if_name, router['external_segment'])
-        elif router['external_net_type'] == p_const.TYPE_FLAT:
+        elif router['external_net_type'] == plugin_constants.TYPE_FLAT:
             # Use physnet id_idx found earlier
             pass
         else:
@@ -1621,7 +1633,8 @@ class VPPForwarder(object):
                         if_idx, self._pack_address(addr[0]), int(addr[1]))
 
         # Delete the subinterface if type VLAN
-        if router['external_net_type'] == p_const.TYPE_VLAN and if_idx:
+        if (router['external_net_type'] == plugin_constants.TYPE_VLAN
+                and if_idx):
             self.vpp.delete_vlan_subif(if_idx)
 
     def create_router_interface_on_host(self, router):
@@ -2091,7 +2104,7 @@ class EtcdListener(object):
         includes the behaviour of whatever's on the other end of the
         interface.
         """
-        # args['binding_type'] in ('vhostuser', 'plugtap'):
+        # args['binding_type'] in ('vhostuser', 'tap'):
         # For GPE, fetch remote mappings from etcd for any "new" network
         # segments we will be binding to so we are aware of all the remote
         # overlay (mac) to underlay (IP) values
@@ -2423,15 +2436,23 @@ class EtcdListener(object):
         i.e. A new port is associated with (or) an existing port is removed,
         the agent needs to update the VPP ACLs belonging to all the
         security groups that use this remote-group in their rules.
+
+        Since this is called from various threads it makes a new etcd
+        client each call.
         """
         secgroups = self.vppf.remote_group_secgroups[remote_group]
         LOG.debug("Updating secgroups:%s referencing the remote_group:%s",
                   secgroups, remote_group)
+        etcd_client = self.client_factory.client()
+        etcd_writer = etcdutils.SignedEtcdJSONWriter(etcd_client)
+
         for secgroup in secgroups:
             secgroup_key = self.secgroup_key_space + "/%s" % secgroup
             # TODO(najoy):Update to the new per thread etcd-client model
-            rv = self.client_factory.client().read(secgroup_key)
-            data = jsonutils.loads(rv.value)
+
+            # TODO(ijw): all keys really present?
+            data = etcd_writer.read(secgroup_key).value
+
             LOG.debug("Updating remote_group rules %s for secgroup %s",
                       data, secgroup)
             self.acl_add_replace(secgroup, data)
@@ -2451,10 +2472,14 @@ class EtcdListener(object):
             return False
 
     def fetch_remote_gpe_mappings(self, vni):
-        """Fetch and add all remote mappings from etcd for the vni"""
+        """Fetch and add all remote mappings from etcd for the vni
+
+        Thread-safe: creates its own client every time
+        """
         key_space = self.gpe_key_space + "/%s" % vni
         LOG.debug("Fetching remote gpe mappings for vni:%s", vni)
-        rv = self.client_factory.client().read(key_space, recursive=True)
+        rv = etcdutils.SignedEtcdJSONWriter(self.client_factory.client()).read(
+            key_space, recursive=True)
         for child in rv.children:
             m = re.match(key_space + '/([^/]+)' + '/([^/]+)' + '/([^/]+)',
                          child.key)
@@ -2663,10 +2688,18 @@ class PortWatcher(etcdutils.EtcdChangeWatcher):
         # an update.
 
         data = jsonutils.loads(value)
+
+        # For backward comatibility reasons, 'plugtap' now means 'tap'
+        # Post-17.07 'tap' is used, but this allows compatibility with
+        # previously stored information in etcd.
+        binding_type = data['binding_type']
+        if binding_type == 'plugtap':
+            binding_type = 'tap'
+
         self.data.bind(
             self.data.binder.add_notification,
             port,
-            data['binding_type'],
+            binding_type,
             data['mac_address'],
             data['physnet'],
             data['network_type'],
@@ -2768,7 +2801,8 @@ class SecGroupWatcher(etcdutils.EtcdChangeWatcher):
                  **kwargs):
         self.known_keys = known_keys
         super(SecGroupWatcher, self).__init__(
-            etcd_client, name, watch_path, **kwargs)
+            etcd_client, name, watch_path,
+            encoder=etcdutils.SignedEtcdJSONWriter, **kwargs)
 
     def init_resync_start(self):
         # TODO(ijw): we should probably do the secgroup work
@@ -2920,6 +2954,7 @@ class BindNotifier(object):
         self.state_key_space = state_key_space
 
         self.etcd_client = client_factory.client()
+        self.etcd_writer = etcdutils.SignedEtcdJSONWriter(self.etcd_client)
 
     def add_notification(self, id, content):
         """Queue a notification for sending to Nova
@@ -2939,9 +2974,10 @@ class BindNotifier(object):
 
                 (port, props) = ent
 
-                self.etcd_client.write(
+                # TODO(ijw): do we ever clean this space up?
+                self.etcd_writer.write(
                     self.state_key_space + '/%s' % port,
-                    jsonutils.dumps(props))
+                    props)
             except Exception:
                 # We must keep running, but we don't expect problems
                 LOG.exception("exception in bind-notify thread")
@@ -2961,21 +2997,35 @@ class VPPRestart(object):
         time.sleep(self.timeout)  # TODO(najoy): check if vpp is actually up
 
 
-def main():
-    cfg.CONF(sys.argv[1:])
-    logging.setup(cfg.CONF, 'vpp_agent')
+def openstack_base_setup(process_name):
+    """General purpose entrypoint
 
+    Sets up non-specific bits (the integration with OpenStack and its
+    config, and so on).
+    """
+    # Arguments, config files and options
+    cfg.CONF(sys.argv[1:])
+
+    # General logging
+    logging.setup(cfg.CONF, process_name)
+
+    # Guru meditation support enabled
     gmr_opts.set_defaults(cfg.CONF)
     gmr.TextGuruMeditation.setup_autorun(
         version.version_info,
         service_name='vpp-agent')
-    # If the user and/or group are specified in config file, we will use
-    # them as configured; otherwise we try to use defaults depending on
-    # distribution. Currently only supporting ubuntu and redhat.
-    cfg.CONF.register_opts(config_opts.vpp_opts, "ml2_vpp")
-    if cfg.CONF.ml2_vpp.enable_vpp_restart:
-        VPPRestart().wait()
 
+
+def ml2_vpp_agent_main():
+    """Main function for VPP agent functionality."""
+
+    openstack_base_setup('vpp_agent')
+
+    compat.register_ml2_base_opts(cfg.CONF)
+    compat.register_securitygroups_opts(cfg.CONF)
+    config_opts.register_vpp_opts(cfg.CONF)
+
+    # Pull physnets out of config and interpret them
     if not cfg.CONF.ml2_vpp.physnets:
         LOG.critical("Missing physnets config. Exiting...")
         sys.exit(1)
@@ -2999,6 +3049,11 @@ def main():
                 sys.exit(1)
             physnets[k] = v
 
+    # Deal with VPP-side setup
+
+    if cfg.CONF.ml2_vpp.enable_vpp_restart:
+        VPPRestart().wait()
+
     # Convert to the minutes unit that VPP uses:
     # (we round *up*)
     mac_age_min = int((cfg.CONF.ml2_vpp.mac_age + 59) / 60)
@@ -3009,6 +3064,8 @@ def main():
                         gpe_locators=cfg.CONF.ml2_vpp.gpe_locators,
                         )
 
+    # Deal with etcd-side setup
+
     LOG.debug("Using etcd host:%s port:%s user:%s password:***",
               cfg.CONF.ml2_vpp.etcd_host,
               cfg.CONF.ml2_vpp.etcd_port,
@@ -3016,9 +3073,11 @@ def main():
 
     client_factory = etcdutils.EtcdClientFactory(cfg.CONF.ml2_vpp)
 
+    # Do the work
+
     ops = EtcdListener(cfg.CONF.host, client_factory, vppf, physnets)
 
     ops.process_ops()
 
 if __name__ == '__main__':
-    main()
+    ml2_vpp_agent_main()

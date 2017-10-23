@@ -16,10 +16,18 @@
 
 import mock
 
+from networking_vpp import compat
+from networking_vpp import config_opts
+
 import etcd
+from networking_vpp.compat import plugin_constants
 from networking_vpp import mech_vpp
-from neutron.plugins.common import constants
-from neutron.plugins.ml2 import config
+try:
+    # TODO(ijw): TEMPORARY, better fix coming that reverses this
+    from neutron.plugins.ml2 import config
+except ImportError:
+    from neutron.conf.plugins.ml2 import config
+    config.register_ml2_plugin_opts()
 from neutron.plugins.ml2 import driver_api as api
 from neutron.tests import base
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -61,13 +69,17 @@ class VPPMechanismDriverTestCase(
     @mock.patch('etcd.Client')
     @mock.patch('networking_vpp.etcdutils.EtcdClientFactory.client')
     def setUp(self, mock_eventlet, mock_client, mock_make_client):
+        compat.register_ml2_base_opts(cfg.CONF)
+        compat.register_securitygroups_opts(cfg.CONF)
+        config_opts.register_vpp_opts(cfg.CONF)
+
         mock_make_client.side_effect = self.etcd_client
         self.client = etcd.Client()
 
-        config.cfg.CONF.set_override('mechanism_drivers',
-                                     ['logger', 'vpp'], 'ml2')
-        config.cfg.CONF.set_override('core_plugin',
-                                     'neutron.plugins.ml2.plugin.Ml2Plugin')
+        cfg.CONF.set_override('mechanism_drivers',
+                              ['logger', 'vpp'], 'ml2')
+        cfg.CONF.set_override('core_plugin',
+                              'neutron.plugins.ml2.plugin.Ml2Plugin')
         core_plugin = cfg.CONF.core_plugin
         super(VPPMechanismDriverTestCase, self).setUp(plugin=core_plugin)
         self.mech = mech_vpp.VPPMechanismDriver()
@@ -76,7 +88,7 @@ class VPPMechanismDriverTestCase(
     # given valid  and invalid segments
     valid_segment = {
         api.ID: 'fake_id',
-        api.NETWORK_TYPE: constants.TYPE_FLAT,
+        api.NETWORK_TYPE: plugin_constants.TYPE_FLAT,
         api.SEGMENTATION_ID: 'fake_segId',
         api.PHYSICAL_NETWORK: 'fake_physnet',
         api.BOUND_SEGMENT: 'fake_segment',
@@ -84,7 +96,7 @@ class VPPMechanismDriverTestCase(
 
     invalid_segment = {
         api.ID: 'API_ID',
-        api.NETWORK_TYPE: constants.TYPE_NONE,
+        api.NETWORK_TYPE: plugin_constants.TYPE_NONE,
         api.SEGMENTATION_ID: 'API_SEGMENTATION_ID',
         api.PHYSICAL_NETWORK: 'API_PHYSICAL_NETWORK'}
 
@@ -106,12 +118,14 @@ class VPPMechanismDriverTestCase(
     def test_get_vif_type(self):
         port_context = self.given_port_context()
         owner = "vhostuser"
-        assert (self.mech.get_vif_type(port_context) == owner), \
-            "Device owner should have been \'%s\'" % owner
+        self.assertEqual(
+            self.mech.get_vif_type(port_context), owner,
+            "Device owner should have been \'%s\'" % owner)
         port_context.current['device_owner'] = "neutron:fake_owner"
-        owner = "plugtap"
-        assert (self.mech.get_vif_type(port_context) == owner), \
-            "Device owner should have been \'%s\'" % owner
+        owner = "tap"
+        self.assertEqual(
+            self.mech.get_vif_type(port_context), owner,
+            "Device owner should have been \'%s\'" % owner)
 
     @mock.patch('networking_vpp.mech_vpp.VPPMechanismDriver.physnet_known',
                 return_value=True)
@@ -148,21 +162,17 @@ class VPPMechanismDriverTestCase(
         # first test valid
         segment = port_context.segments_to_bind[0]
         host = port_context.host
-        assert(self.mech.check_segment(segment, host) is True), \
-            "Return value should have been True"
+        self.assertEqual(self.mech.check_segment(segment, host), True)
         # then test invalid bind
         segment = port_context.segments_to_bind[1]
-        assert(self.mech.check_segment(segment, host) is False), \
-            "Return value should have been False"
+        self.assertEqual(self.mech.check_segment(segment, host), False)
 
     def test_check_vlan_transparency(self):
         # shrircha: this is useless, as the function simply returns false.
         # placeholder, for when this is implemented in the future.
         # this test will need to be updated to reflect this.
         port_context = self.given_port_context()
-        assert(self.mech.check_vlan_transparency(port_context) is False), \
-            "Return value for port [%s] should have been False" % (
-                port_context.current.id)
+        self.assertFalse(self.mech.check_vlan_transparency(port_context))
 
     @mock.patch('networking_vpp.mech_vpp.EtcdAgentCommunicator.unbind')
     @mock.patch('networking_vpp.mech_vpp.EtcdAgentCommunicator.bind')
@@ -229,6 +239,13 @@ class VPPMechanismDriverTestCase(
 
 
 class EtcdAgentCommunicatorTestCases(base.BaseTestCase):
+    def setUp(self):
+        compat.register_ml2_base_opts(cfg.CONF)
+        compat.register_securitygroups_opts(cfg.CONF)
+        config_opts.register_vpp_opts(cfg.CONF)
+
+        super(EtcdAgentCommunicatorTestCases, self).setUp()
+
     @mock.patch('etcd.Client')
     def test_etcd_no_config(self, mock_client):
         # etcd_port should default to 127.0.0.1

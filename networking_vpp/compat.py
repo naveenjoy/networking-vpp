@@ -56,6 +56,13 @@ except ImportError:
     n_const = neutron.common.constants
     n_exec = neutron.common.exceptions
 
+# Some of the TYPE_XXX objects also moved in Pike/Queens
+if hasattr(n_const, 'TYPE_FLAT'):
+    plugin_constants = n_const
+else:
+    import neutron.plugin.common.constants
+    plugin_constants = neutron.plugin.common.constants
+
 try:
     n_const.UUID_PATTERN
 except AttributeError:
@@ -80,22 +87,40 @@ except ImportError:
     model_base = neutron.db.model_base
 
 # Register security group option
-# Mitaka compatibility
+def register_securitygroups_opts(cfg):
+    # Mitaka compatibility
+    try:
+        from neutron.conf.agent import securitygroups_rpc
+        securitygroups_rpc.register_securitygroups_opts()
+    except ImportError:
+        security_group_opts = [
+            cfg.BoolOpt(
+                'enable_security_group', default=True,
+                help=_('Controls whether neutron security groups is enabled '
+                       'Set it to false to disable security groups')), ]
+        # This can get loaded from other parts of Mitaka because other
+        # mechanism drivers respect this flag too
+        if not (hasattr(cfg.CONF, 'SECURITYGROUP') and
+                hasattr(cfg.CONF.SECURITYGROUP.enable_security_group)):
+            cfg.register_opts(security_group_opts, 'SECURITYGROUP')
+
+def register_ml2_base_opts(cfg):
+    try:
+        # Older
+        from neutron.plugins.ml2 import config
+        # Calls register whether you like it or not, with no choice on arg
+    except ImportError:
+        # Newer (Pike-ish)
+        from neutron.conf.plugins.ml2 import config
+        config.register_ml2_plugin_opts(cfg)
+
 try:
-    from neutron.conf.agent import securitygroups_rpc
-    securitygroups_rpc.register_securitygroups_opts()
+    # (for, specifically, get_random_mac)
+    # Newer:
+    from neutron_lib.utils import net as net_utils
 except ImportError:
-    from oslo_config import cfg
-    security_group_opts = [
-        cfg.BoolOpt(
-            'enable_security_group', default=True,
-            help=_('Controls whether neutron security groups is enabled '
-                   'Set it to false to disable security groups')), ]
-    # This can get loaded from other parts of Mitaka because other
-    # mechanism drivers respect this flag too
-    if not (hasattr(cfg.CONF, 'SECURITYGROUP') and
-            hasattr(cfg.CONF.SECURITYGROUP.enable_security_group)):
-        cfg.CONF.register_opts(security_group_opts, 'SECURITYGROUP')
+    # Older:
+    from neutron.common import utils as net_utils
 
 import os
 import re

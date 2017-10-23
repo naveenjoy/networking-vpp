@@ -26,9 +26,11 @@ import re
 import six
 import time
 
+from networking_vpp import compat
 from networking_vpp.compat import context as n_context
 from networking_vpp.compat import directory
 from networking_vpp.compat import n_const
+from networking_vpp.compat import plugin_constants
 from networking_vpp.compat import portbindings
 from networking_vpp import config_opts
 from networking_vpp.db import db
@@ -38,9 +40,7 @@ from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.db import api as neutron_db_api
-from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
-from oslo_serialization import jsonutils
 
 try:
     # Newton and on
@@ -76,15 +76,17 @@ LOG = logging.getLogger(__name__)
 
 class VPPMechanismDriver(api.MechanismDriver):
     supported_vnic_types = [portbindings.VNIC_NORMAL]
-    allowed_network_types = [p_constants.TYPE_FLAT,
-                             p_constants.TYPE_VLAN,
-                             p_constants.TYPE_VXLAN]
+    allowed_network_types = [plugin_constants.TYPE_FLAT,
+                             plugin_constants.TYPE_VLAN,
+                             plugin_constants.TYPE_VXLAN]
     MECH_NAME = 'vpp'
 
     vif_details = {}
 
     def initialize(self):
-        cfg.CONF.register_opts(config_opts.vpp_opts, "ml2_vpp")
+        config_opts.register_vpp_opts(cfg.CONF)
+        compat.register_securitygroups_opts(cfg.CONF)
+
         self.communicator = EtcdAgentCommunicator(self.port_bind_complete)
 
     def get_vif_type(self, port_context):
@@ -100,7 +102,7 @@ class VPPMechanismDriver(api.MechanismDriver):
         owner = port_context.current['device_owner']
         for f in n_const.DEVICE_OWNER_PREFIXES:
             if owner.startswith(f):
-                vif_type = 'plugtap'
+                vif_type = 'tap'
         LOG.debug("vif_type to be bound is: %s", vif_type)
         return vif_type
 
@@ -201,7 +203,8 @@ class VPPMechanismDriver(api.MechanismDriver):
             )
             return False
 
-        if network_type in [p_constants.TYPE_FLAT, p_constants.TYPE_VLAN]:
+        if network_type in [plugin_constants.TYPE_FLAT,
+                            plugin_constants.TYPE_VLAN]:
             physnet = segment[api.PHYSICAL_NETWORK]
             if not self.physnet_known(host, physnet):
                 LOG.debug(
@@ -516,6 +519,7 @@ class EtcdAgentCommunicator(AgentCommunicator):
         # don't have threading problems from the caller.
         try:
             etcd_client = self.client_factory.client()
+
             etcd_client.read('%s/state/%s/alive' % (LEADIN, host))
             etcd_client.read('%s/state/%s/physnets/%s' %
                              (LEADIN, host, physnet))
@@ -1009,31 +1013,20 @@ class EtcdAgentCommunicator(AgentCommunicator):
         # Assign a UUID to each worker thread to enable thread election
         return eventlet.spawn(self._forward_worker)
 
-    def do_etcd_update(self, etcd_client, k, v):
+    def do_etcd_update(self, etcd_writer, k, v):
         with eventlet.Timeout(cfg.CONF.ml2_vpp.etcd_write_time, False):
             if v is None:
-                try:
-                    etcd_client.delete(k)
-                except etcd.EtcdNotFile:
-                    # We are asked to delete a directory as in the
-                    # case of GPE where the empty mac address directory
-                    # needs deletion after the key (IP) has been deleted.
-                    try:
-                        etcd_client.delete(k, dir=True)
-                    except Exception:  # pass any exceptions
-                        pass
-                except etcd.EtcdKeyNotFound:
-                    # The key may have already been deleted
-                    # no problem here
-                    pass
+                etcd_writer.delete(k)
             else:
-                etcd_client.write(k, jsonutils.dumps(v))
+                etcd_writer.write(k, v)
 
     def _forward_worker(self):
         LOG.debug('forward worker begun')
         etcd_client = self.client_factory.client()
+        etcd_writer = etcdutils.SignedEtcdJSONWriter(etcd_client)
         lease_time = cfg.CONF.ml2_vpp.forward_worker_master_lease_time
         recovery_time = cfg.CONF.ml2_vpp.forward_worker_recovery_time
+
         etcd_election = etcdutils.EtcdElection(etcd_client, 'forward_worker',
                                                self.election_key_space,
                                                work_time=lease_time,
@@ -1052,7 +1045,7 @@ class EtcdAgentCommunicator(AgentCommunicator):
                 # by a further extension).
 
                 def work(k, v):
-                    self.do_etcd_update(etcd_client, k, v)
+                    self.do_etcd_update(etcd_writer, k, v)
 
                 # We will try to empty the pending rows in the DB
                 while True:

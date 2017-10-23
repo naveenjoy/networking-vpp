@@ -15,9 +15,10 @@
 import mock
 
 import etcd
+from networking_vpp import compat
+from networking_vpp.compat import plugin_constants
 from networking_vpp import config_opts
 from networking_vpp import mech_vpp
-from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.tests import base
 from oslo_config import cfg
@@ -45,14 +46,14 @@ FAKE_PORT = {'status': 'DOWN',
 LEADIN = '/networking-vpp'
 valid_segment = {
     api.ID: 'fake_id',
-    api.NETWORK_TYPE: constants.TYPE_FLAT,
+    api.NETWORK_TYPE: plugin_constants.TYPE_FLAT,
     api.SEGMENTATION_ID: 'fake_segId',
     api.PHYSICAL_NETWORK: 'fake_physnet',
     api.BOUND_SEGMENT: 'fake_segment',
     api.BOUND_DRIVER: 'vpp'}
 invalid_segment = {
     api.ID: 'API_ID',
-    api.NETWORK_TYPE: constants.TYPE_NONE,
+    api.NETWORK_TYPE: plugin_constants.TYPE_NONE,
     api.SEGMENTATION_ID: 'API_SEGMENTATION_ID',
     api.PHYSICAL_NETWORK: 'API_PHYSICAL_NETWORK'}
 
@@ -75,7 +76,8 @@ class EtcdAgentCommunicatorTestCase(base.BaseTestCase):
         mock_make_client.side_effect = self.etcd_client
         self.client = etcd.Client()
 
-        cfg.CONF.register_opts(config_opts.vpp_opts, "ml2_vpp")
+        config_opts.register_vpp_opts(cfg.CONF)
+        compat.register_securitygroups_opts(cfg.CONF)
 
         def callback(host, port):
             pass
@@ -86,8 +88,9 @@ class EtcdAgentCommunicatorTestCase(base.BaseTestCase):
         """A trivial test"""
         host = 'vpp0'
         port = {'id': '1234-5678-9012-3456'}
-        assert (self.agent_communicator._port_path(host, port) ==
-                "/networking-vpp/nodes/vpp0/ports/1234-5678-9012-3456")
+        self.assertEqual(
+            self.agent_communicator._port_path(host, port),
+            "/networking-vpp/nodes/vpp0/ports/1234-5678-9012-3456")
 
     def given_port_context(self):
         from neutron.plugins.ml2 import driver_context as ctx
@@ -175,4 +178,4 @@ class EtcdAgentCommunicatorTestCase(base.BaseTestCase):
         self.agent_communicator.do_etcd_update(self.client, key, val)
         # What's written is JSON, so has extra quotes
         self.client.write.assert_called_with(
-            key, '\"' + val + '\"')
+            key, val)

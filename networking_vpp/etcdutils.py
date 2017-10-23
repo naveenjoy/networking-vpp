@@ -19,6 +19,7 @@ import atexit
 import etcd
 import eventlet
 import eventlet.semaphore
+from oslo_config import cfg
 from oslo_log import log as logging
 import re
 import six
@@ -26,13 +27,187 @@ import time
 from urllib3.exceptions import TimeoutError as UrllibTimeoutError
 import uuid
 
+from networking_vpp._i18n import _
 from networking_vpp import exceptions as vpp_exceptions
+from networking_vpp import jwt_agent
+
+from oslo_serialization import jsonutils
 
 
 LOG = logging.getLogger(__name__)
 
 ETC_HOSTS_DELIMITER = ','
 ETC_PORT_HOST_DELIMITER = ':'
+
+
+@six.add_metaclass(ABCMeta)
+class EtcdWriter(object):
+
+    @abstractmethod
+    def _process_read_value(self, key, value):
+        """Turn a string from etcd into a value in the style we prefer
+
+        May parse, validate and/or otherwise modify the result.
+        """
+
+        pass
+
+    @abstractmethod
+    def _process_written_value(self, key, value):
+        """Turn a value into a serialised string to store in etcd
+
+        May serialise, sign and/or otherwise modify the result.
+        """
+        pass
+
+    def __init__(self, etcd_client):
+        self.etcd_client = etcd_client
+
+    def write(self, key, data, *args, **kwargs):
+        """Serialise and write a single data key in etcd.
+
+        The value is received as a Python data structure and stored in
+        a conventional format (serialised to JSON, in this class
+        instance).
+
+        """
+        data = self._process_written_value(key, data)
+
+        self.etcd_client.write(key, data, *args, **kwargs)
+
+    def read(self, *args, **kwargs):
+        """Watch and parse a data key in etcd.
+
+        The value is stored in a conventional format (serialised
+        somehow) and we parse it to Python.  This may throw an
+        exception if the data cannot be read when .value is called on
+        any part of the result.
+
+        """
+        return ParsedEtcdResult(self,
+                                self.etcd_client.read(*args, **kwargs))
+
+    def watch(self, *args, **kwargs):
+        """Watch and parse a data key in etcd.
+
+        The value is stored in a conventional format (serialised
+        somehow) and we parse it to Python.  This may throw an
+        exception if the data cannot be read when .value is called on
+        any part of the result.
+
+        """
+
+        return ParsedEtcdResult(self,
+                                self.etcd_client.watch(*args, **kwargs))
+
+    def delete(self, key):
+        # NB there's no way of clearly indicating that a delete is
+        # legitimate - the parser has no role in it, here.
+
+        # We do augment the delete to delete more throroughly.  This
+        # should probably be a mixin.
+        try:
+            self.etcd_client.delete(key)
+        except etcd.EtcdNotFile:
+            # We are asked to delete a directory as in the
+            # case of GPE where the empty mac address directory
+            # needs deletion after the key (IP) has been deleted.
+            try:
+                # TODO(ijw): define semantics: recursive delete?
+                self.etcd_client.delete(key, dir=True)
+            except Exception:  # pass any exceptions
+                pass
+        except etcd.EtcdKeyNotFound:
+            # The key may have already been deleted
+            # no problem here
+            pass
+
+
+class ParsedEtcdResult(etcd.EtcdResult):
+    """Parsed version of an EtcdResult
+
+    An equivalent to EtcdResult that processes its values using the
+    parser that the reading class implements.
+    """
+
+    def __init__(self, reader, result):
+
+        self._reader = reader
+        self._result = result
+
+    @property
+    def value(self):
+        return self._reader._process_read_value(self._result.key,
+                                                self._result.value)
+
+    def get_subtree(self, *args, **kwargs):
+        for f in self._result.get_subtree(*args, **kwargs):
+            # This returns a value which may itself have a subtree
+            # depending on args passed
+
+            return ParsedEtcdResult(self._reader, self._result)
+
+    # We know a bit too much about the internals of EtcdResult, but
+    # given that, we know that the internals all work from .value or
+    # .get_subtree() and the rest of the calls should use parsed
+    # result values.
+
+
+class EtcdJSONWriter(EtcdWriter):
+    """Write Python datastructures to etcd in a consistent form.
+
+    This takes values (typically as Python datastructures) and
+    converts them using JSON serialisation to a form that can be
+    stored in etcd, and vice versa.
+
+    """
+
+    def __init__(self, etcd_client):
+        super(EtcdJSONWriter, self).__init__(etcd_client)
+
+    def _process_read_value(self, key, value):
+        value = jsonutils.loads(value)
+        return value
+
+    def _process_written_value(self, key, value):
+        return jsonutils.dumps(value)
+
+
+class SignedEtcdJSONWriter(EtcdJSONWriter):
+    """Write Python datastructures to etcd in a consistent form.
+
+    This takes values (typically as Python datastructures) and
+    converts them using JSON serialisation to a form that can be
+    stored in etcd, and vice versa.
+
+    """
+
+    def __init__(self, etcd_client):
+        self.jwt_signing = cfg.CONF.ml2_vpp.jwt_signing
+        if (self.jwt_signing):
+            self.jwt_agent = jwt_agent.JWTUtils(
+                cfg.CONF.ml2_vpp.jwt_node_cert,
+                cfg.CONF.ml2_vpp.jwt_node_private_key,
+                cfg.CONF.ml2_vpp.jwt_ca_cert,
+                cfg.CONF.ml2_vpp.jwt_controller_name_pattern)
+        super(SignedEtcdJSONWriter, self).__init__(etcd_client)
+
+    def _process_read_value(self, key, value):
+        value = jsonutils.loads(value)
+        if (self.jwt_signing):
+            if (self.jwt_agent.should_path_be_signed(key)):
+                signerNodeName = self.jwt_agent.get_signer_name(key)
+                value = self.jwt_agent.verify(signerNodeName,
+                                              key,
+                                              value)
+        return value
+
+    def _process_written_value(self, key, value):
+        if (self.jwt_signing):
+            if (self.jwt_agent.should_path_be_signed(key)):
+                value = self.jwt_agent.sign(key, value)
+        return jsonutils.dumps(value)
+
 
 elector_cleanup = []
 
@@ -301,7 +476,6 @@ class EtcdWatcher(object):
             self.removed(f)
 
     def do_work(self, action, key, value):
-
         """Process an indiviudal update received in a watch
 
         Override this if you can deal with individual updates given
@@ -428,7 +602,7 @@ class EtcdWatcher(object):
                             self.do_work(rv.action, rv.key, rv.value)
                         except Exception:
                             LOG.exception(('%s key %s value %s could'
-                                          'not be processed')
+                                           'not be processed')
                                           % (rv.action, rv.key, rv.value))
                             # TODO(ijw) raise or not raise?  This is probably
                             # fatal and incurable, because we will only repeat
@@ -469,7 +643,7 @@ class EtcdChangeWatcher(EtcdWatcher):
 
     def __init__(self, etcd_client, name, watch_path, election_path=None,
                  wait_until_elected=False, recovery_time=5,
-                 data=None, heartbeat=60):
+                 data=None, heartbeat=60, encoder=EtcdJSONWriter):
         self.implemented_state = {}
         self.watch_path = watch_path
 
@@ -591,9 +765,37 @@ class EtcdHelper(object):
             # Already gone, so not a problem
             pass
 
+# Base connection to etcd, using standard options.
+
+_etcd_conn_opts = [
+    cfg.StrOpt('etcd_host', default="127.0.0.1",
+               help=_("Etcd host IP address(es) to connect etcd client."
+                      "It takes two formats: single IP/host or a multiple "
+                      "hosts list with this format: 'IP:Port,IP:Port'. "
+                      "e.g: 192.168.1.1:2379,192.168.1.2:2379.  If port "
+                      "is absent, etcd_port is used.")),
+    cfg.IntOpt('etcd_port', default=4001,
+               help=_("Etcd port to connect the etcd client.  This can "
+                      "be overridden on a per-host basis if the multiple "
+                      "host form of etcd_host is used.")),
+    cfg.StrOpt('etcd_user', default=None,
+               help=_("Username for etcd authentication")),
+    cfg.StrOpt('etcd_pass', default=None,
+               help=_("Password for etcd authentication")),
+    # TODO(ijw): make false default
+    cfg.BoolOpt('etcd_insecure_explicit_disable_https', default=True,
+                help=_("Use TLS to access etcd")),
+    cfg.StrOpt('etcd_ca_cert', default=None,
+               help=_("etcd CA certificate file path")),
+]
+
+
+def register_etcd_conn_opts(cfg, group):
+    global _etcd_conn_opts
+    cfg.register_opts(_etcd_conn_opts, group)
+
 
 class EtcdClientFactory(object):
-
     def _parse_host(self, etc_host_elem, default_port):
         """Parse a single etcd host entry (which can be host or host/port)
 
@@ -640,22 +842,22 @@ class EtcdClientFactory(object):
 
         return etc_hosts
 
-    def __init__(self, ml2_vpp_conf):
-        hostconf = self._parse_host_config(ml2_vpp_conf.etcd_host,
-                                           ml2_vpp_conf.etcd_port)
+    def __init__(self, conf_group):
+        hostconf = self._parse_host_config(conf_group.etcd_host,
+                                           conf_group.etcd_port)
 
         self.etcd_args = {
             'host': hostconf,
-            'username': ml2_vpp_conf.etcd_user,
-            'password': ml2_vpp_conf.etcd_pass,
+            'username': conf_group.etcd_user,
+            'password': conf_group.etcd_pass,
             'allow_reconnect': True}
 
-        if not ml2_vpp_conf.etcd_insecure_explicit_disable_https:
-            if ml2_vpp_conf.etcd_ca_cert is None:
+        if not conf_group.etcd_insecure_explicit_disable_https:
+            if conf_group.etcd_ca_cert is None:
                 raise vpp_exceptions.InvalidEtcdCAConfig()
 
             self.etcd_args['protocol'] = 'https'
-            self.etcd_args['ca_cert'] = ml2_vpp_conf.etcd_ca_cert
+            self.etcd_args['ca_cert'] = conf_group.etcd_ca_cert
 
         else:
             LOG.warning("etcd is not using HTTPS, insecure setting")
